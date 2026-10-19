@@ -1,4 +1,6 @@
 import AppKit
+import Combine
+import Sparkle
 import SwiftUI
 
 /// 接收从 Dock 图标或 `open -a` 传入的文件夹
@@ -28,10 +30,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 struct AIPhotoApp: App {
     @NSApplicationDelegateAdaptor private var delegate: AppDelegate
     @State private var model = AppModel()
+    private let updaterController: SPUStandardUpdaterController
 
     init() {
         AppSettings.registerDefaults()
         InpaintService.registerDefaults()
+        updaterController = SPUStandardUpdaterController(startingUpdater: true, updaterDelegate: nil, userDriverDelegate: nil)
     }
 
     var body: some Scene {
@@ -43,6 +47,9 @@ struct AIPhotoApp: App {
                 .onAppear { delegate.openFolder = { [model] in model.load($0) } }
         }
         .commands {
+            CommandGroup(after: .appInfo) {
+                CheckForUpdatesView(updater: updaterController.updater)
+            }
             CommandGroup(replacing: .newItem) {
                 Button("打开照片文件夹…") { model.openFolder() }
                     .keyboardShortcut("o")
@@ -88,5 +95,29 @@ struct AIPhotoApp: App {
             SettingsView()
                 .environment(model)
         }
+    }
+}
+
+/// 「检查更新…」菜单项；更新检查进行中时禁用
+private struct CheckForUpdatesView: View {
+    @ObservedObject private var viewModel: CheckForUpdatesViewModel
+    private let updater: SPUUpdater
+
+    init(updater: SPUUpdater) {
+        self.updater = updater
+        viewModel = CheckForUpdatesViewModel(updater: updater)
+    }
+
+    var body: some View {
+        Button("检查更新…", action: updater.checkForUpdates)
+            .disabled(!viewModel.canCheckForUpdates)
+    }
+}
+
+private final class CheckForUpdatesViewModel: ObservableObject {
+    @Published var canCheckForUpdates = false
+
+    init(updater: SPUUpdater) {
+        updater.publisher(for: \.canCheckForUpdates).assign(to: &$canCheckForUpdates)
     }
 }

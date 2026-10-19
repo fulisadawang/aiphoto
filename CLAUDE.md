@@ -12,6 +12,7 @@
   xcodegen generate && xcodebuild -project AIPhoto.xcodeproj -scheme AIPhoto -configuration Debug -derivedDataPath build/DerivedData build
   ```
 - 运行：`open -a build/DerivedData/Build/Products/Debug/AIPhoto.app <照片文件夹>`（可直接带文件夹路径打开）。
+- 发版与自动更新（Sparkle 2）：`scripts/release.sh <版本号> [发布说明.md]` 改版本号、Release 编译、打 zip、签名并更新仓库根目录的 `appcast.xml`；加 `--publish` 才提交推送并创建 GitHub Release。App 从 `raw.githubusercontent.com/.../main/appcast.xml` 读更新清单，安装包下载自 Releases。EdDSA 私钥只在作者本机登录钥匙串（账户 `ed25519`），公钥在 `project.yml` 的 `SUPublicEDKey`；**私钥丢失后已安装的 App 无法再收到更新**。发版前须征得用户同意（公开发布）。
 - Swift 5 语言模式，macOS 15+，本机临时签名、无沙盒、无 Hardened Runtime。`NSAllowsLocalNetworking` 已开，用于访问本机 http 服务。
 - 没有单元测试。未经用户同意不要新增测试；验证方式见下文。
 

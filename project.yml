@@ -4,12 +4,19 @@ options:
   deploymentTarget:
     macOS: "15.0"
   developmentLanguage: zh-Hans
+packages:
+  # 自动更新，发版流程见 scripts/release.sh
+  Sparkle:
+    url: https://github.com/sparkle-project/Sparkle
+    from: 2.10.0
 targets:
   AIPhoto:
     type: application
     platform: macOS
     sources:
       - AIPhoto
+    dependencies:
+      - package: Sparkle
     info:
       path: AIPhoto/Info.plist
       properties:
@@ -20,6 +27,11 @@ targets:
         LSApplicationCategoryType: public.app-category.photography
         LSMinimumSystemVersion: "$(MACOSX_DEPLOYMENT_TARGET)"
         NSPrincipalClass: NSApplication
+        # Sparkle 自动更新：清单在仓库 main 分支，安装包在 GitHub Releases，发版见 scripts/release.sh
+        SUFeedURL: https://raw.githubusercontent.com/fulisadawang/aiphoto/main/appcast.xml
+        SUPublicEDKey: UuKKT4SrkszM4j9yt/T6YaTUIvqodGB3aPwtxTty928=
+        # 自用，不再在第二次启动时询问是否自动检查
+        SUEnableAutomaticChecks: true
         # 允许访问本机 http 服务（如 Magpie 127.0.0.1:3425）
         NSAppTransportSecurity:
           NSAllowsLocalNetworking: true

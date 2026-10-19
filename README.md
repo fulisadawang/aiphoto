@@ -22,6 +22,10 @@ SwiftUI + Core Image + Vision 实现，AI 部分调用任何 OpenAI 兼容接口
 - [XcodeGen](https://github.com/yonaskolb/XcodeGen)：`brew install xcodegen`
 - 一个 OpenAI 兼容的模型服务（AI 选片、去杂物、对话改图需要；只用本地分组和手动选片可以不配）
 
+## 安装与更新
+
+从 [Releases](https://github.com/fulisadawang/aiphoto/releases) 下载 `AIPhoto-<版本>.zip`，解压后把 `AIPhoto.app` 拖进「应用程序」。App 没有 Apple 开发者签名，第一次打开会被系统拦截：在「系统设置 › 隐私与安全性」里点「仍要打开」。之后 App 会自动检查更新（也可以在「AI选片 › 检查更新…」手动检查），确认后自动下载、校验签名并重启。
+
 ## 编译运行
 
 ```bash
