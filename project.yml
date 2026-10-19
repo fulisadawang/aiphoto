@@ -1,0 +1,45 @@
+name: AIPhoto
+options:
+  bundleIdPrefix: com.nieyutan
+  deploymentTarget:
+    macOS: "15.0"
+  developmentLanguage: zh-Hans
+targets:
+  AIPhoto:
+    type: application
+    platform: macOS
+    sources:
+      - AIPhoto
+    info:
+      path: AIPhoto/Info.plist
+      properties:
+        CFBundleName: AI选片
+        CFBundleDisplayName: AI选片
+        CFBundleShortVersionString: "$(MARKETING_VERSION)"
+        CFBundleVersion: "$(CURRENT_PROJECT_VERSION)"
+        LSApplicationCategoryType: public.app-category.photography
+        LSMinimumSystemVersion: "$(MACOSX_DEPLOYMENT_TARGET)"
+        NSPrincipalClass: NSApplication
+        # 允许访问本机 http 服务（如 Magpie 127.0.0.1:3425）
+        NSAppTransportSecurity:
+          NSAllowsLocalNetworking: true
+        # 允许把文件夹拖到 Dock 图标上打开
+        CFBundleDocumentTypes:
+          - CFBundleTypeName: 照片文件夹
+            CFBundleTypeRole: Viewer
+            LSHandlerRank: Alternate
+            LSItemContentTypes: [public.folder]
+    settings:
+      base:
+        PRODUCT_NAME: AIPhoto
+        PRODUCT_BUNDLE_IDENTIFIER: com.nieyutan.aiphoto
+        SWIFT_VERSION: "5.0"
+        MARKETING_VERSION: "0.1.0"
+        CURRENT_PROJECT_VERSION: "1"
+        GENERATE_INFOPLIST_FILE: NO
+        # 仅自用：本机临时签名，不开沙盒，便于直接读写照片文件夹
+        CODE_SIGN_IDENTITY: "-"
+        CODE_SIGN_STYLE: Manual
+        ENABLE_APP_SANDBOX: NO
+        ENABLE_HARDENED_RUNTIME: NO
+        DEVELOPMENT_TEAM: ""

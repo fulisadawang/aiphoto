@@ -1,0 +1,16 @@
+# 编译产物
+build/
+DerivedData/
+
+# 由 project.yml 通过 xcodegen 生成
+AIPhoto.xcodeproj/
+AIPhoto/Info.plist
+
+# Xcode 用户数据
+xcuserdata/
+*.xcuserstate
+
+# 本机工具配置
+.claude/settings.local.json
+
+.DS_Store
