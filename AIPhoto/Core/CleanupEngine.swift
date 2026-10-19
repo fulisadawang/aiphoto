@@ -4,9 +4,10 @@ import Foundation
 import ImageIO
 import UniformTypeIdentifiers
 
-/// 云端补全服务的统一接口：输入局部图和蒙版（白色为要消除的区域），返回补好的局部图
+/// 云端补全服务的统一接口：输入局部图和蒙版（白色为要处理的区域），返回补好的局部图。
+/// prompt 为 nil 时去掉蒙版内的物体；对话改图的重画会传入具体指令
 protocol InpaintProvider: Sendable {
-    func inpaint(image: CGImage, mask: CGImage) async throws -> CGImage
+    func inpaint(image: CGImage, mask: CGImage, prompt: String?) async throws -> CGImage
 }
 
 /// 去杂物：只把涂抹区域附近裁一块送去补全，结果羽化后贴回，原图其余像素保持不变
@@ -39,7 +40,7 @@ enum CleanupEngine {
     }
 
     static func run(
-        photo: Photo, strokes: [BrushStroke], folder: URL, provider: InpaintProvider
+        photo: Photo, strokes: [BrushStroke], prompt: String? = nil, folder: URL, provider: InpaintProvider
     ) async throws -> CleanupPatch {
         guard !strokes.isEmpty else { throw CleanupError.emptyStrokes }
         guard let source = PhotoRenderer.fullResolution(of: photo) else { throw CleanupError.unreadable }
@@ -62,7 +63,7 @@ enum CleanupEngine {
               let uploadMask = drawMask(strokes, crop: crop, imageSize: imageSize, size: uploadSize, grow: 1.1)
         else { throw CleanupError.render }
 
-        let filled = try await provider.inpaint(image: uploadImage, mask: uploadMask)
+        let filled = try await provider.inpaint(image: uploadImage, mask: uploadMask, prompt: prompt)
 
         // 结果放大回原始分辨率，只保留涂抹区域（边缘羽化），其余部分仍是原图像素
         guard let filledFull = resize(filled, to: crop.size),

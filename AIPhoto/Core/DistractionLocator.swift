@@ -46,32 +46,38 @@ struct DistractionLocator {
     /// 构成场景的景物，即使模型列为背景杂物也不去除：提示词里已经要求不要列，实拍中模型仍会偶尔把"远处围栏"列进来
     static let sceneryWords = ["围栏", "栅栏", "篱笆", "树木", "草地", "天空", "池塘", "建筑"]
 
-    /// 宽容解析：数字可能写成字符串；有的模型习惯用 box_2d = [ymin, xmin, ymax, xmax]
+    /// 宽容解析，框的格式见 box(in:)
     static func parse(_ data: Data) throws -> [Item] {
         guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
               let items = json["items"] as? [[String: Any]]
         else { throw LocateError.badFormat(String(decoding: data, as: UTF8.self)) }
+        return items.compactMap { item -> Item? in
+            guard let name = item["name"] as? String, let box = box(in: item) else { return nil }
+            let isScenery = sceneryWords.contains { name.contains($0) }
+            return Item(name: name, isBackground: (item["category"] as? String) != "subject" && !isScenery, box: box)
+        }
+    }
+
+    /// 从模型输出的一项里读出包围框（0～1000 → 归一化，原点左上）。
+    /// 数字可能写成字符串；有的模型用 box_2d = [ymin, xmin, ymax, xmax]
+    static func box(in item: [String: Any]) -> CGRect? {
         func number(_ value: Any?) -> Double? {
             if let value = value as? Double { return value }
             if let value = value as? String { return Double(value.trimmingCharacters(in: .whitespaces)) }
             return nil
         }
-        return items.compactMap { item -> Item? in
-            var edges = ["left", "top", "right", "bottom"].map { number(item[$0]) }
-            if edges.contains(where: { $0 == nil }), let box = item["box_2d"] as? [Any], box.count == 4 {
-                let v = box.map(number)
-                edges = [v[1], v[0], v[3], v[2]]
-            }
-            guard let name = item["name"] as? String, let l = edges[0], let t = edges[1], let r = edges[2], let b = edges[3] else { return nil }
-            // 模型偶尔会把左右或上下写反，统一排序；面积为 0 的丢弃
-            let x0 = min(l, r), x1 = max(l, r), y0 = min(t, b), y1 = max(t, b)
-            guard x1 > x0, y1 > y0 else { return nil }
-            let box = CGRect(x: x0 / 1000, y: y0 / 1000, width: (x1 - x0) / 1000, height: (y1 - y0) / 1000)
-                .intersection(CGRect(x: 0, y: 0, width: 1, height: 1))
-            guard !box.isNull else { return nil }
-            let isScenery = sceneryWords.contains { name.contains($0) }
-            return Item(name: name, isBackground: (item["category"] as? String) != "subject" && !isScenery, box: box)
+        var edges = ["left", "top", "right", "bottom"].map { number(item[$0]) }
+        if edges.contains(where: { $0 == nil }), let box = item["box_2d"] as? [Any], box.count == 4 {
+            let v = box.map(number)
+            edges = [v[1], v[0], v[3], v[2]]
         }
+        guard let l = edges[0], let t = edges[1], let r = edges[2], let b = edges[3] else { return nil }
+        // 模型偶尔会把左右或上下写反，统一排序；面积为 0 的丢弃
+        let x0 = min(l, r), x1 = max(l, r), y0 = min(t, b), y1 = max(t, b)
+        guard x1 > x0, y1 > y0 else { return nil }
+        let box = CGRect(x: x0 / 1000, y: y0 / 1000, width: (x1 - x0) / 1000, height: (y1 - y0) / 1000)
+            .intersection(CGRect(x: 0, y: 0, width: 1, height: 1))
+        return box.isNull ? nil : box
     }
 
     /// 把框转成覆盖整个框的画笔笔触（横向逐行涂满），外扩一点盖住物体边缘

@@ -84,6 +84,8 @@ struct Photo: Identifiable, Codable {
     var cleanups: [CleanupPatch]?
     /// 一键初修的记录；可选类型以兼容旧的选片记录
     var retouchLog: RetouchLog?
+    /// 对话改图的记录；可选类型以兼容旧的选片记录
+    var chat: [ChatMessage]?
 
     init(id: String) {
         self.id = id

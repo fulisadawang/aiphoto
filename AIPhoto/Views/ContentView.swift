@@ -5,6 +5,9 @@ struct ContentView: View {
     @State private var showInspector = true
     @FocusState private var viewerFocused: Bool
 
+    /// 对话改图的输入框有焦点时，按键交给文本框，不触发选片快捷键（文本框编辑时第一响应者是字段编辑器 NSTextView）
+    private var isEditingText: Bool { NSApp.keyWindow?.firstResponder is NSTextView }
+
     var body: some View {
         @Bindable var model = model
         NavigationSplitView {
@@ -40,16 +43,17 @@ struct ContentView: View {
             InspectorView()
                 .inspectorColumnWidth(min: 260, ideal: 300, max: 380)
         }
-        .onKeyPress(.leftArrow) { model.gridMode ? model.gridStep(by: -1) : model.previousPhoto(); return .handled }
-        .onKeyPress(.rightArrow) { model.gridMode ? model.gridStep(by: 1) : model.nextPhoto(); return .handled }
-        .onKeyPress(.upArrow) { model.gridMode ? model.gridStepGroup(by: -1) : model.previousGroup(); return .handled }
-        .onKeyPress(.downArrow) { model.gridMode ? model.gridStepGroup(by: 1) : model.nextGroup(); return .handled }
+        .onKeyPress(.leftArrow) { if isEditingText { return .ignored }; model.gridMode ? model.gridStep(by: -1) : model.previousPhoto(); return .handled }
+        .onKeyPress(.rightArrow) { if isEditingText { return .ignored }; model.gridMode ? model.gridStep(by: 1) : model.nextPhoto(); return .handled }
+        .onKeyPress(.upArrow) { if isEditingText { return .ignored }; model.gridMode ? model.gridStepGroup(by: -1) : model.previousGroup(); return .handled }
+        .onKeyPress(.downArrow) { if isEditingText { return .ignored }; model.gridMode ? model.gridStepGroup(by: 1) : model.nextGroup(); return .handled }
         .onKeyPress(.space) {
-            guard !model.brushMode else { return .ignored }
+            guard !model.brushMode, !isEditingText else { return .ignored }
             model.zoomToFocus()
             return .handled
         }
         .onKeyPress(keys: [.return]) { press in
+            if isEditingText { return .ignored }
             if model.gridMode, let id = model.selectedPhotoID {
                 model.openInViewer(id)
                 return .handled
@@ -59,11 +63,12 @@ struct ContentView: View {
             return .handled
         }
         .onKeyPress(.escape) {
-            guard model.brushMode else { return .ignored }
+            guard model.brushMode, !isEditingText else { return .ignored }
             if model.strokes.isEmpty { model.toggleBrush() } else { model.strokes = [] }
             return .handled
         }
         .onKeyPress(characters: CharacterSet(charactersIn: "pxufabzkjgPXUFABZKJG012345\\[]")) { press in
+            if isEditingText { return .ignored }
             model.handleKey(press.characters)
             return .handled
         }

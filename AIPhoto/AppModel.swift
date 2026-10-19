@@ -81,12 +81,20 @@ final class AppModel {
         let itemName: String?
         /// 消除区域较大时完成后提示检查
         let isLarge: Bool
+        /// 重画指令（对话改图）；nil 表示去掉涂抹区域里的物体
+        var prompt: String? = nil
+        /// 来自对话改图：结果回写到对话里，不进初修记录
+        var fromChat = false
         var isRunning = false
     }
 
     var cleanupJobs: [CleanupJob] = []
     /// 正在让 AI 识别干扰物位置的照片
     var locatingPhotoIDs: Set<String> = []
+    /// 对话改图面板是否打开
+    var chatPanelOpen = false
+    /// 正在等模型理解指令的照片
+    var chattingPhotoIDs: Set<String> = []
     /// 一键初修进度：已处理 / 总数；nil 表示没有在初修
     var retouchProgress: (done: Int, total: Int)?
     var showRetouchSummary = false
@@ -282,7 +290,7 @@ final class AppModel {
     }
 
     /// 看图模型客户端，AI 选片和定位干扰物共用；配置有问题时弹提示并返回 nil
-    private func makeVisionClient() async -> VisionChatClient? {
+    private func makeVisionClient(model: String = AppSettings.model) async -> VisionChatClient? {
         let text = AppSettings.baseURL.trimmingCharacters(in: .whitespaces)
         guard let baseURL = URL(string: text), baseURL.scheme?.hasPrefix("http") == true else {
             alert = AlertInfo(title: "选片模型地址无效", message: "请在「AI选片 › 设置…」里检查接口地址：\(text)")
@@ -292,7 +300,7 @@ final class AppModel {
             return VisionChatClient(
                 baseURL: baseURL,
                 apiKey: try await KeychainStore.loadIfSaved(account: AppSettings.keychainAccount) ?? "",
-                model: AppSettings.model
+                model: model
             )
         } catch {
             alert = AlertInfo(title: "读取 API 密钥失败", message: error.localizedDescription)
@@ -752,7 +760,9 @@ final class AppModel {
         do {
             guard let photo = photos[job.photoID] else { throw CleanupEngine.CleanupError.unreadable }
             let provider = try await InpaintService.makeProvider()
-            outcome = .success(try await CleanupEngine.run(photo: photo, strokes: job.strokes, folder: folder, provider: provider))
+            outcome = .success(try await CleanupEngine.run(
+                photo: photo, strokes: job.strokes, prompt: job.prompt, folder: folder, provider: provider
+            ))
         } catch {
             outcome = .failure(error)
         }
@@ -765,9 +775,11 @@ final class AppModel {
         case .success(let patch):
             // 先读后写：@Observable 属性在写入期间再读取同一属性会触发独占访问冲突而崩溃
             let patches = (photos[job.photoID]?.cleanups ?? []) + [patch]
-            recordUndo(.cleanups, ids: [job.photoID], label: job.itemName.map { "去掉\($0)" } ?? "去杂物")
+            recordUndo(.cleanups, ids: [job.photoID], label: job.undoLabel)
             photos[job.photoID]?.cleanups = patches
-            if let item = job.itemName {
+            if job.fromChat {
+                appendChat(job.photoID, ChatMessage(role: .assistant, text: "已完成：\(job.undoLabel)"))
+            } else if let item = job.itemName {
                 appendLog(job.photoID) {
                     if job.isLarge {
                         $0.warnings.append("去掉了\(item)，消除区域较大，建议对比检查")
@@ -778,7 +790,11 @@ final class AppModel {
             }
         case .failure(let error):
             cleanupFailures.append("\(name)：\(error.localizedDescription)")
-            if let item = job.itemName {
+            if job.fromChat {
+                appendChat(job.photoID, ChatMessage(
+                    role: .assistant, text: "\(job.undoLabel)失败：\(error.localizedDescription)", isError: true
+                ))
+            } else if let item = job.itemName {
                 appendLog(job.photoID) { $0.warnings.append("去掉\(item)失败：\(error.localizedDescription)") }
             }
         }
@@ -791,6 +807,114 @@ final class AppModel {
             )
             cleanupFailures = []
         }
+    }
+
+    // MARK: - 对话改图
+
+    /// 摄影师对当前照片说一句话：调色立即生效，去除和重画进后台队列，完成后回写到对话里
+    func sendChat(_ text: String) {
+        let instruction = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !instruction.isEmpty, let id = selectedPhotoID, let folder = folderURL, !chattingPhotoIDs.contains(id) else { return }
+        let history = photos[id]?.chat ?? []
+        appendChat(id, ChatMessage(role: .user, text: instruction))
+        scheduleSave()
+        chattingPhotoIDs.insert(id)
+        Task {
+            defer { chattingPhotoIDs.remove(id) }
+            guard let client = await makeVisionClient(model: AppSettings.chatModel) else {
+                appendChat(id, ChatMessage(role: .assistant, text: "看图模型的设置有问题，没有执行。", isError: true))
+                return
+            }
+            do {
+                guard let photo = photos[id] else { return }
+                let preview = try await Task.detached { try Self.chatPreview(photo, folder: folder) }.value
+                let editor = ChatEditor(client: client)
+                let plan = try await editor.plan(
+                    image: preview, edit: photo.edit ?? .neutral, history: history, instruction: instruction
+                )
+                // 去除和重画先校正位置，确认不到的不执行
+                let faces = photo.analysis?.faces.map(\.box) ?? []
+                var targets: [ChatEditor.Target] = [], missing: [String] = []
+                for target in plan.remove + plan.redraw {
+                    if let box = try await editor.resolve(target, in: preview, faces: faces) {
+                        targets.append(ChatEditor.Target(name: target.name, box: box, prompt: target.prompt, isFace: target.isFace))
+                    } else {
+                        missing.append(target.name)
+                    }
+                }
+                // 等待期间换了文件夹或照片被移除：丢弃结果
+                guard folderURL == folder, photos[id] != nil else { return }
+                let aspect = CGFloat(preview.width) / CGFloat(preview.height)
+                applyChatPlan(plan, targets: targets, missing: missing, photoID: id, instruction: instruction, imageAspect: aspect)
+            } catch {
+                appendChat(id, ChatMessage(role: .assistant, text: "没能完成：\(error.localizedDescription)", isError: true))
+            }
+            scheduleSave()
+        }
+    }
+
+    /// 给模型看的当前效果：缩小的预览叠上去杂物和调色
+    private nonisolated static func chatPreview(_ photo: Photo, folder: URL) throws -> CGImage {
+        guard let image = ImageLoader.image(at: photo.editURL, maxPixel: 1280),
+              let rendered = try PhotoRenderer.render(
+                  image, edit: photo.edit, faces: photo.analysis?.faces ?? [], patches: photo.cleanups ?? [], folder: folder
+              )
+        else { throw AnalyzerError.unreadable(photo.editURL) }
+        return rendered
+    }
+
+    private func applyChatPlan(
+        _ plan: ChatEditor.Plan, targets: [ChatEditor.Target], missing: [String],
+        photoID id: String, instruction: String, imageAspect aspect: CGFloat
+    ) {
+        if !plan.adjust.isEmpty {
+            // 在最新的参数上改，期间摄影师手动拖过的滑块不被覆盖
+            let edit = ChatEditor.applying(plan.adjust, to: photos[id]?.edit ?? .neutral)
+            recordUndo(.edit, ids: [id], label: "对话改图：\(instruction.prefix(10))")
+            photos[id]?.edit = edit == .neutral ? nil : edit
+        }
+        let pixelSize = photos[id].flatMap { ImageLoader.orientedPixelSize(at: $0.editURL) }
+        var skipped: [String] = []
+        for target in targets {
+            let strokes = DistractionLocator.strokes(covering: target.box, imageAspect: aspect)
+            if target.prompt != nil, let pixelSize {
+                let crop = CleanupEngine.cropRect(for: strokes, imageSize: pixelSize)
+                if max(crop.width, crop.height) / Double(CleanupEngine.uploadMaxPixel) > ChatEditor.maxRedrawUpscale {
+                    skipped.append(target.name)
+                    continue
+                }
+            }
+            cleanupJobs.append(CleanupJob(
+                photoID: id,
+                strokes: strokes,
+                itemName: target.name,
+                isLarge: false,
+                prompt: target.prompt.map(ChatEditor.redrawPrompt),
+                fromChat: true
+            ))
+        }
+        pumpCleanupQueue()
+        appendChat(id, ChatMessage(role: .assistant, text: plan.reply))
+        if !missing.isEmpty {
+            appendChat(id, ChatMessage(
+                role: .assistant,
+                text: "放大确认时没找到「\(missing.joined(separator: "」「"))」，没有执行。可以说得更具体些，比如位置和颜色。",
+                isError: true
+            ))
+        }
+        if !skipped.isEmpty {
+            appendChat(id, ChatMessage(
+                role: .assistant,
+                text: "「\(skipped.joined(separator: "」「"))」范围太大，重画后细节会明显变糊，没有执行。可以换成整体调色，或说得更具体一些缩小范围。",
+                isError: true
+            ))
+        }
+    }
+
+    private func appendChat(_ photoID: String, _ message: ChatMessage) {
+        // 先读后写，避免 @Observable 独占访问冲突
+        let messages = (photos[photoID]?.chat ?? []) + [message]
+        photos[photoID]?.chat = messages
     }
 
     private func appendLog(_ photoID: String, _ change: (inout RetouchLog) -> Void) {
@@ -1078,5 +1202,12 @@ final class AppModel {
                 alert = AlertInfo(title: "保存选片记录失败", message: error.localizedDescription)
             }
         }
+    }
+}
+
+extension AppModel.CleanupJob {
+    var undoLabel: String {
+        guard let itemName else { return "去杂物" }
+        return prompt == nil ? "去掉\(itemName)" : "重画\(itemName)"
     }
 }

@@ -92,7 +92,7 @@ struct OpenAICompatibleInpainter: InpaintProvider {
         }
     }
 
-    func inpaint(image: CGImage, mask: CGImage) async throws -> CGImage {
+    func inpaint(image: CGImage, mask: CGImage, prompt: String?) async throws -> CGImage {
         guard let imageData = CleanupEngine.pngData(image),
               let maskImage = Self.transparentMask(from: mask),
               let maskData = CleanupEngine.pngData(maskImage)
@@ -109,7 +109,7 @@ struct OpenAICompatibleInpainter: InpaintProvider {
             body.append(Data("\r\n".utf8))
         }
         if let model { field("model", model) }
-        field("prompt", Self.prompt)
+        field("prompt", prompt ?? Self.prompt)
         file("image", imageData)
         file("mask", maskData)
         body.append(Data("--\(boundary)--\r\n".utf8))

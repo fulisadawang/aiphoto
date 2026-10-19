@@ -4,6 +4,7 @@ struct SettingsView: View {
     @Environment(AppModel.self) private var model
 
     @AppStorage(AppSettings.modelKey) private var modelID = AppSettings.defaultModel
+    @AppStorage(AppSettings.chatModelKey) private var chatModelID = AppSettings.defaultChatModel
     @AppStorage(AppSettings.baseURLKey) private var selectBaseURL = AppSettings.defaultBaseURL
     @AppStorage(AppSettings.perGroupKey) private var perGroup = 6
     @AppStorage(AppSettings.blurKey) private var blurThreshold = 40.0
@@ -32,7 +33,8 @@ struct SettingsView: View {
                     Text(keyStatus).foregroundStyle(.secondary)
                 }
                 TextField("模型", text: $modelID, prompt: Text(AppSettings.defaultModel))
-                Text("OpenAI 兼容的 /chat/completions 接口，模型需要能看图。")
+                TextField("对话改图模型", text: $chatModelID, prompt: Text(AppSettings.defaultChatModel))
+                Text("OpenAI 兼容的 /chat/completions 接口，模型需要能看图。对话改图要框出物体位置，需要定位准的模型。")
                     .font(.caption)
                     .foregroundStyle(.secondary)
                 Stepper("每组最多送审 \(perGroup) 张", value: $perGroup, in: 1...AIRanker.maxImagesPerRequest)

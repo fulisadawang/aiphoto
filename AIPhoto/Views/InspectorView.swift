@@ -4,7 +4,9 @@ struct InspectorView: View {
     @Environment(AppModel.self) private var model
 
     var body: some View {
-        if let photo = model.selectedPhoto {
+        if let photo = model.selectedPhoto, model.chatPanelOpen {
+            ChatPanel(photo: photo)
+        } else if let photo = model.selectedPhoto {
             Form {
                 Section("选片") {
                     HStack {
@@ -23,6 +25,8 @@ struct InspectorView: View {
                         }
                     }
                 }
+
+                ChatEntrySection(photo: photo)
 
                 if let log = photo.retouchLog {
                     RetouchLogSection(log: log)
