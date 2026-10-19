@@ -38,7 +38,7 @@ enum LocalAnalyzer {
         }
 
         let imageSize = CGSize(width: image.width, height: image.height)
-        let faces = zip(faceObservations, qualities).map { observation, quality in
+        var faces = zip(faceObservations, qualities).map { observation, quality in
             let b = observation.boundingBox
             let openness = eyeOpenness(of: observation, luma: luma)
             return FaceInfo(
@@ -48,6 +48,16 @@ enum LocalAnalyzer {
                 isBlinking: openness.map { $0 < blinkRatio } ?? false,
                 features: featurePolygons(of: observation, imageSize: imageSize)
             )
+        }
+
+        // 远景小脸在 1600 像素的分析图上眼睛只有几个像素，量不了；从原图裁出脸部重新定位眼睛再量。
+        // 只有出现小脸的照片才多解码一次原图
+        if faces.contains(where: { $0.eyeOpenness == nil }), let full = ImageLoader.image(at: url, maxPixel: 8000) {
+            for index in faces.indices where faces[index].eyeOpenness == nil {
+                guard let openness = try highResEyeOpenness(face: faces[index].box, in: full) else { continue }
+                faces[index].eyeOpenness = openness
+                faces[index].isBlinking = openness < blinkRatio
+            }
         }
 
         // 纪实里背影、侧脸、远景很常见：没有人脸时取最大的人体框当主体
@@ -94,6 +104,22 @@ enum LocalAnalyzer {
     }
 
     /// 返回两只眼中较大的"深色区域高度 / 眼宽"，任意一只眼睁开就不算闭眼
+    /// 在原图上裁出脸部（四周多留 40%）重新检测关键点并测量眼睛
+    private static func highResEyeOpenness(face box: CGRect, in image: CGImage) throws -> Float? {
+        let region = box.insetBy(dx: -box.width * 0.4, dy: -box.height * 0.4)
+            .intersection(CGRect(x: 0, y: 0, width: 1, height: 1))
+        let pixels = CGRect(
+            x: region.minX * CGFloat(image.width), y: region.minY * CGFloat(image.height),
+            width: region.width * CGFloat(image.width), height: region.height * CGFloat(image.height)
+        ).integral
+        guard let crop = image.cropping(to: pixels) else { return nil }
+        let request = VNDetectFaceLandmarksRequest()
+        try VNImageRequestHandler(cgImage: crop, options: [:]).perform([request])
+        guard let face = (request.results ?? []).max(by: { $0.boundingBox.width * $0.boundingBox.height < $1.boundingBox.width * $1.boundingBox.height })
+        else { return nil }
+        return eyeOpenness(of: face, luma: try LumaPlane(image: crop))
+    }
+
     private static func eyeOpenness(of face: VNFaceObservation, luma: LumaPlane) -> Float? {
         guard let landmarks = face.landmarks else { return nil }
         let imageSize = CGSize(width: luma.width, height: luma.height)

@@ -82,6 +82,8 @@ struct Photo: Identifiable, Codable {
     var edit: EditSettings?
     /// 去杂物的修补块，按顺序叠加；可选类型以兼容旧的选片记录
     var cleanups: [CleanupPatch]?
+    /// 一键初修的记录；可选类型以兼容旧的选片记录
+    var retouchLog: RetouchLog?
 
     init(id: String) {
         self.id = id
@@ -90,8 +92,9 @@ struct Photo: Identifiable, Codable {
     /// 扫描时至少会填入其中一个文件；优先用相机直出 JPG，比解码 RAW 快得多
     var displayURL: URL { renderedURL ?? rawURL! }
 
-    /// 修图、去杂物、导出都基于这个文件：有 RAW 用 RAW
-    var editURL: URL { rawURL ?? renderedURL! }
+    /// 修图、去杂物、导出都基于这个文件：有相机 JPG 时用 JPG（保留相机厂商调校的色彩），只有 RAW 时才用 RAW 解码。
+    /// 实拍对比：Apple 的 RAW 渲染红色更艳、对比更平，初修起点不如相机直出
+    var editURL: URL { renderedURL ?? rawURL! }
 
     var fileName: String { (id as NSString).lastPathComponent }
 
@@ -112,6 +115,21 @@ struct Photo: Identifiable, Codable {
         case .none: nil
         }
     }
+}
+
+/// 初修记录：自动做了什么、哪些需要摄影师看一眼
+struct RetouchLog: Codable, Equatable {
+    /// 已自动处理，如"曝光 +0.3""去掉了右下角婴儿车"
+    var actions: [String] = []
+    /// 建议检查，如消除区域较大、消除失败
+    var warnings: [String] = []
+    /// 初修无法修复的问题，如闭眼、模糊
+    var unfixable: [String] = []
+    /// 识别到但没有去除的主体相关物品，如孩子手里的玩具
+    var kept: [String] = []
+
+    /// 主体相关物品（草帽、篮子等）几乎每张亲子照都有，只记录、不算需要检查，否则总结里人人都"需要看一眼"
+    var needsReview: Bool { !warnings.isEmpty || !unfixable.isEmpty }
 }
 
 /// 一次去杂物的结果：补好的局部图存成带透明通道的 PNG，按区域贴回原图

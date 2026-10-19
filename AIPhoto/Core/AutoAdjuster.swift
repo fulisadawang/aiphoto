@@ -8,7 +8,10 @@ enum AutoAdjuster {
     static let whiteBalanceStrength = 0.7
     /// 有人脸时把人脸亮度拉到该值（sRGB），儿童肤色在 0.55~0.65 之间比较通透
     static let faceTarget = 0.58
-    static let sceneTarget = 0.46
+    /// 没有人脸时，画面平均亮度在这个范围内就不动：晴天明亮、阴天低调都是正常的
+    static let sceneRange = 0.32...0.68
+    /// 加曝光时新增的死白像素不能超过画面的这个比例
+    static let maxNewlyClipped = 0.02
 
     static func compute(url: URL, analysis: LocalAnalysis?) throws -> EditSettings {
         guard let image = ImageLoader.editBase(at: url, maxPixel: 256) else { throw AnalyzerError.unreadable(url) }
@@ -23,20 +26,30 @@ enum AutoAdjuster {
             edit.tint = (tint * whiteBalanceStrength).rounded()
         }
 
-        let face = analysis?.mainFace
-        let current = face.map { pixels.meanLuma(in: $0.box) } ?? pixels.meanLuma(in: CGRect(x: 0, y: 0, width: 1, height: 1))
-        let target = face == nil ? sceneTarget : faceTarget
-        if current > 0.01 {
-            let ev = log2(pow(target, 2.2) / pow(current, 2.2)) * 0.8
-            edit.exposure = (min(1.5, max(-1.5, ev)) * 100).rounded() / 100
-        }
+        let wanted = desiredExposure(pixels: pixels, face: analysis?.mainFace)
+        // 高光保护：阴影里的孩子要提亮，但不能把外面的白墙、白衣服、天空推成死白
+        let allowed = wanted > 0 ? min(wanted, pixels.maxExposureKeepingHighlights(maxNewlyClipped: maxNewlyClipped)) : wanted
+        edit.exposure = (min(1.5, max(-1.5, allowed)) * 100).rounded() / 100
+        // 曝光被高光保护限住时，剩下的用"提亮阴影"补，只抬暗部、不动亮部
+        if wanted - allowed > 0.3 { edit.shadows = min(0.6, (wanted - allowed) * 0.4) }
 
         if let analysis {
             if analysis.highlightClip > 0.02 { edit.highlights = -0.4 }
-            if analysis.shadowClip > 0.05 { edit.shadows = 0.3 }
+            if analysis.shadowClip > 0.05 { edit.shadows = max(edit.shadows, 0.3) }
         }
-        edit.vibrance = 0.15
         return edit
+    }
+
+    /// 想要的曝光补偿（EV）。有人脸按人脸亮度；没有人脸时只救明显过暗或过亮的画面
+    private static func desiredExposure(pixels: SRGBPixels, face: FaceInfo?) -> Double {
+        func ev(from current: Double, to target: Double) -> Double {
+            current > 0.01 ? log2(pow(target, 2.2) / pow(current, 2.2)) : 0
+        }
+        if let face { return ev(from: pixels.meanLuma(in: face.box), to: faceTarget) * 0.8 }
+        let mean = pixels.meanLuma(in: CGRect(x: 0, y: 0, width: 1, height: 1))
+        if mean < sceneRange.lowerBound { return ev(from: mean, to: sceneRange.lowerBound + 0.06) }
+        if mean > sceneRange.upperBound { return ev(from: mean, to: sceneRange.upperBound - 0.06) }
+        return 0
     }
 
     /// 搜索一个光源色温/色调，使中性像素的平均色经 CITemperatureAndTint 校正后最接近灰色
@@ -117,6 +130,26 @@ private struct SRGBPixels {
         }
         guard count > width * height / 50 else { return nil }
         return (sum.0 / Double(count), sum.1 / Double(count), sum.2 / Double(count))
+    }
+
+    /// 在新增死白像素不超过 maxNewlyClipped 的前提下，最多能加多少曝光（EV）。
+    /// 曝光是线性值乘 2^EV，按亮度直方图逐档检查哪些原本没到顶的像素会被推到顶
+    func maxExposureKeepingHighlights(maxNewlyClipped: Double) -> Double {
+        var histogram = [Int](repeating: 0, count: 256)
+        for index in stride(from: 0, to: bytes.count, by: 4) {
+            let luma = 0.2126 * Double(bytes[index]) + 0.7152 * Double(bytes[index + 1]) + 0.0722 * Double(bytes[index + 2])
+            histogram[min(255, Int(luma))] += 1
+        }
+        let total = Double(width * height), clip = 247
+        func newlyClipped(_ ev: Double) -> Double {
+            let limit = pow(Double(clip) / 255, 2.2) / pow(2, ev)
+            var count = 0
+            for level in 0..<clip where pow(Double(level) / 255, 2.2) >= limit { count += histogram[level] }
+            return Double(count) / total
+        }
+        var ev = 0.0
+        while ev < 1.5, newlyClipped(ev + 0.05) <= maxNewlyClipped { ev += 0.05 }
+        return ev
     }
 
     /// rect 为归一化坐标（原点左上），返回 sRGB 亮度均值

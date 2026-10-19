@@ -26,6 +26,7 @@ struct Filmstrip: View {
 }
 
 struct FilmstripCell: View {
+    @Environment(AppModel.self) private var model
     let photo: Photo
     let selected: Bool
 
@@ -52,6 +53,11 @@ struct FilmstripCell: View {
             }
             .overlay(alignment: .bottomLeading) {
                 HStack(spacing: 3) {
+                    if model.isCleaning(photo.id) {
+                        Text("修复中").badgeStyle(.blue)
+                    } else if photo.retouchLog?.needsReview == true {
+                        Text("需检查").badgeStyle(.pink)
+                    }
                     ForEach(photo.flags.sorted { $0.rawValue < $1.rawValue }, id: \.self) { flag in
                         Text(flag.label).badgeStyle(.orange)
                     }

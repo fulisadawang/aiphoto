@@ -38,14 +38,14 @@ enum InpaintService: String, CaseIterable, Identifiable {
         case invalidBaseURL(String)
         var errorDescription: String? {
             switch self {
-            case .notConfigured: "还没有配置去杂物服务，请在「AI选片 › 设置…」里选择服务并填写密钥。"
+            case .notConfigured: "还没有配置去杂物服务，请在「AI选片 › 设置…」里选择服务。"
             case .invalidBaseURL(let text): "去杂物服务地址无效：\(text)"
             }
         }
     }
 
     /// 按当前设置创建服务；未配置时抛错，由界面提示用户去设置
-    static func makeProvider() throws -> InpaintProvider {
+    static func makeProvider() async throws -> InpaintProvider {
         switch current {
         case .none:
             throw ConfigError.notConfigured
@@ -58,7 +58,7 @@ enum InpaintService: String, CaseIterable, Identifiable {
             let model = (defaults.string(forKey: modelKey) ?? "").trimmingCharacters(in: .whitespaces)
             return OpenAICompatibleInpainter(
                 baseURL: baseURL,
-                apiKey: try KeychainStore.load(account: keychainAccount) ?? "",
+                apiKey: try await KeychainStore.loadIfSaved(account: keychainAccount) ?? "",
                 model: model.isEmpty ? nil : model
             )
         }

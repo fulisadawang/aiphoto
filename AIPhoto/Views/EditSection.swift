@@ -9,12 +9,12 @@ struct EditSection: View {
         Section("修图") {
             HStack {
                 Button { model.autoAdjustSelected() } label: { Label("自动 A", systemImage: "wand.and.stars") }
-                Button("重置") { model.updateEdit(.neutral) }
+                Button("重置") { model.updateEdit(.neutral, recordingUndo: "重置修图") }
                     .disabled(photo.edit == nil)
                 Spacer()
-                Toggle("原图 \\", isOn: Binding(get: { model.showOriginal }, set: { model.showOriginal = $0 }))
+                Toggle("对比 \\", isOn: Binding(get: { model.compareMode }, set: { model.compareMode = $0 }))
                     .toggleStyle(.button)
-                    .disabled(photo.edit == nil)
+                    .help("修复前后对比：左边原图，右边修复后，拖动中间的分割线")
             }
             .buttonStyle(.bordered)
             .disabled(model.isBusy)
@@ -24,7 +24,7 @@ struct EditSection: View {
                 set: { id in
                     var updated = photo.edit ?? .neutral
                     updated.styleID = id
-                    model.updateEdit(updated)
+                    model.updateEdit(updated, recordingUndo: "风格")
                 }
             )) {
                 Text("无").tag(UUID?.none)
@@ -81,7 +81,10 @@ struct EditSection: View {
                     update(&edit, newValue)
                     model.updateEdit(edit)
                 }
-            ), in: range)
+            ), in: range) { editing in
+                // 整次拖动只记一步撤销
+                if editing { model.beginEditChange(title) }
+            }
             .controlSize(.small)
         }
     }

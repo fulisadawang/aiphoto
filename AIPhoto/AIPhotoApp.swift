@@ -48,6 +48,15 @@ struct AIPhotoApp: App {
                     .keyboardShortcut("o")
                     .disabled(model.isBusy)
             }
+            // 替换系统的撤销菜单：撤销的是选片和修图操作，菜单上写明撤销的是什么
+            CommandGroup(replacing: .undoRedo) {
+                Button(model.undoLabel.map { "撤销「\($0)」" } ?? "撤销") { model.undo() }
+                    .keyboardShortcut("z")
+                    .disabled(model.undoLabel == nil)
+                Button(model.redoLabel.map { "重做「\($0)」" } ?? "重做") { model.redo() }
+                    .keyboardShortcut("z", modifiers: [.command, .shift])
+                    .disabled(model.redoLabel == nil)
+            }
             CommandMenu("选片") {
                 Group {
                     Button("AI 选片（只处理还没评估的组）") { model.runAI(all: false) }
@@ -57,6 +66,10 @@ struct AIPhotoApp: App {
                     Button("把选片结果写入 RAW 的 XMP 星级") { model.writeXMP() }
                         .keyboardShortcut("e", modifiers: [.command, .shift])
                     Button("拷贝已选照片到文件夹…") { model.copyPicked() }
+                    Divider()
+                    Button("一键初修已选照片…") { model.showRetouchStart = true }
+                        .keyboardShortcut("r", modifiers: [.command, .shift])
+                    Button("查看初修总结") { model.showRetouchSummary = true }
                     Divider()
                     Button("已选照片自动调色（跳过已调过的）") { model.autoAdjustAllPicked() }
                     Button("导出已选成片（JPG）…") { model.exportFinishedJPEGs() }

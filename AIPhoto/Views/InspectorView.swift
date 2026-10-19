@@ -24,6 +24,12 @@ struct InspectorView: View {
                     }
                 }
 
+                if let log = photo.retouchLog {
+                    RetouchLogSection(log: log)
+                }
+
+                ShootingInfoSection(photo: photo)
+
                 CleanupSection(photo: photo)
 
                 EditSection(photo: photo)

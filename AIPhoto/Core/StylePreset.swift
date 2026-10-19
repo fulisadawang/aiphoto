@@ -116,8 +116,8 @@ enum StyleLearner {
             for url in try FileManager.default.contentsOfDirectory(at: folder, includingPropertiesForKeys: nil, options: .skipsHiddenFiles)
             where extensions.contains(url.pathExtension.lowercased()) {
                 let key = url.deletingPathExtension().lastPathComponent.lowercased()
-                // 同名同时有 RAW 和 JPG 时优先 RAW：修图底图就是 RAW 解码
-                if map[key] == nil || PhotoScanner.rawExtensions.contains(url.pathExtension.lowercased()) {
+                // 同名同时有 RAW 和 JPG 时优先 JPG：与修图底图（Photo.editURL）一致
+                if map[key] == nil || PhotoScanner.renderedExtensions.contains(url.pathExtension.lowercased()) {
                     map[key] = url
                 }
             }
@@ -136,7 +136,7 @@ enum StyleLearner {
         var counts = [Double](repeating: 0, count: n * n * n)
 
         for (index, pair) in pairs.enumerated() {
-            // 原图是 RAW 时按修图底图解码，学到的风格才能和预览、导出对上
+            // 按修图底图读取原图，学到的风格才能和预览、导出对上
             guard let before = ImageLoader.editBase(at: pair.original, maxPixel: 384) else {
                 throw LearnError.unreadable(pair.original.lastPathComponent)
             }

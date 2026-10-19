@@ -38,22 +38,28 @@ enum Culling {
         return groups
     }
 
+    /// 画面几乎一样时放宽的时间窗口：摄影师架好机位等孩子动作，同一场景常常前后拍十几秒
+    static let sameSceneDistance: Float = 0.3
+    static let sameSceneMaxGap: TimeInterval = 30
+
     private static func isSameBurst(
         _ a: Photo, _ b: Photo, prints: [String: VNFeaturePrintObservation], params: Params
     ) throws -> Bool {
+        var gap: TimeInterval?
         if let dateA = a.captureDate, let dateB = b.captureDate {
-            let gap = dateB.timeIntervalSince(dateA)
-            if gap > params.maxGap { return false }
+            gap = dateB.timeIntervalSince(dateA)
             // 1 秒内的连拍必然是同一场景；孩子动作快、虚焦帧的画面特征会突变，不能再按相似度拆开
-            if gap <= 1 { return true }
+            if let gap, gap <= 1 { return true }
         }
         guard let printA = prints[a.id], let printB = prints[b.id] else {
             // 没有画面特征时只能靠时间判断
-            return a.captureDate != nil && b.captureDate != nil
+            return gap.map { $0 <= params.maxGap } ?? false
         }
         var distance: Float = 0
         try printA.computeDistance(&distance, to: printB)
-        return distance <= params.maxDistance
+        guard let gap else { return distance <= params.maxDistance }
+        if distance <= sameSceneDistance { return gap <= sameSceneMaxGap }
+        return gap <= params.maxGap && distance <= params.maxDistance
     }
 
     /// 计算问题标记和本地评分。清晰度在组内相对比较，避免不同场景光线差异导致误判
@@ -78,7 +84,8 @@ enum Culling {
                     flags.insert(.blurry)
                 }
                 if analysis.faces.contains(where: \.isBlinking) { flags.insert(.eyesClosed) }
-                if analysis.highlightClip > 0.1 { flags.insert(.overexposed) }
+                // 门槛定在 20%：顺光下的白窗框、白衣服常占 5～12%，主体曝光正常时不该整张标"过曝"；局部用过曝提示看
+                if analysis.highlightClip > 0.2 { flags.insert(.overexposed) }
                 if analysis.meanLuma < 0.15 && analysis.shadowClip > 0.3 { flags.insert(.underexposed) }
 
                 let qualities = analysis.faces.compactMap(\.quality).map(Double.init)

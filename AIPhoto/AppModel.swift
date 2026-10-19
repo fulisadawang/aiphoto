@@ -24,10 +24,25 @@ final class AppModel {
     var selectedGroupID: Int?
     var selectedPhotoID: String?
     var filter: Filter = .all
-    var zoomed = false
+    /// 放大状态全局共享，切换照片时保持倍数和位置，便于在连拍中逐张比较同一处
+    var zoom = ZoomState()
     var showFaces = false
-    /// 按住对比：显示未调色、未去杂物的原图
-    var showOriginal = false
+    /// 修复前后对比：大图中间一条分割线，左边原图、右边修复后；切换照片时保持
+    var compareMode = false
+    /// 分割线位置，占大图宽度的比例
+    var compareDivider: CGFloat = 0.5
+
+    /// 看片辅助开关，默认关闭，免得干扰看图
+    var showPeaking = false
+    var showClipping = false
+
+    /// 网格总览：一屏看完整场照片，可多选批量操作
+    var gridMode = false
+    var gridSelection: Set<String> = []
+    var gridThumbSize: CGFloat = 150
+
+    /// 当前大图（修复后）的直方图，由大图视图在图像变化时计算
+    var histogram: Histogram?
 
     /// 画笔模式：在大图上涂抹要去掉的物体
     var brushMode = false
@@ -42,7 +57,46 @@ final class AppModel {
 
     private var saveTask: Task<Void, Never>?
 
-    /// 个人风格预设列表（全局，与照片文件夹无关）
+    /// 撤销记录只保存某一类用户字段的旧值，并按字段恢复：
+    /// AI 结果、后台去杂物等是异步写入的，整份回退会把它们一起冲掉
+    private enum UndoKind {
+        case decision, edit, cleanups
+    }
+
+    private struct UndoEntry {
+        let kind: UndoKind
+        let label: String
+        let before: [String: Photo]
+    }
+
+    private var undoStack: [UndoEntry] = []
+    private var redoStack: [UndoEntry] = []
+
+    /// 后台去杂物队列：不占住界面，摄影师可以继续选片
+    struct CleanupJob: Identifiable {
+        let id = UUID()
+        let photoID: String
+        let strokes: [BrushStroke]
+        /// 要写进初修记录的物体名称，如"右下角婴儿车"；手动涂抹为 nil
+        let itemName: String?
+        /// 消除区域较大时完成后提示检查
+        let isLarge: Bool
+        var isRunning = false
+    }
+
+    var cleanupJobs: [CleanupJob] = []
+    /// 正在让 AI 识别干扰物位置的照片
+    var locatingPhotoIDs: Set<String> = []
+    /// 一键初修进度：已处理 / 总数；nil 表示没有在初修
+    var retouchProgress: (done: Int, total: Int)?
+    var showRetouchSummary = false
+    var showRetouchStart = false
+    /// 本轮队列里失败的任务，队列清空时统一提示
+    private var cleanupFailures: [String] = []
+    /// 同时向去杂物服务发出的请求数
+    private static let cleanupConcurrency = 2
+
+        /// 个人风格预设列表（全局，与照片文件夹无关）
     var styles: [StylePreset] = []
 
     init() {
@@ -67,6 +121,13 @@ final class AppModel {
     var selectedGroup: PhotoGroup? { groups.first { $0.id == selectedGroupID } }
     var selectedPhotos: [Photo] { selectedGroup.map(members(of:)) ?? [] }
     var selectedPhoto: Photo? { selectedPhotoID.flatMap { photos[$0] } }
+
+    var undoLabel: String? {
+        if brushMode, !strokes.isEmpty { return "画笔笔触" }
+        return undoStack.last?.label
+    }
+
+    var redoLabel: String? { redoStack.last?.label }
 
     var pickedCount: Int { photos.values.filter { $0.decision == .pick }.count }
     var rejectedCount: Int { photos.values.filter { $0.decision == .reject }.count }
@@ -103,6 +164,12 @@ final class AppModel {
         groups = []
         selectedGroupID = nil
         selectedPhotoID = nil
+        undoStack = []
+        redoStack = []
+        cleanupJobs = []
+        cleanupFailures = []
+        locatingPhotoIDs = []
+        retouchProgress = nil
         perform("正在扫描文件夹…") {
             let scanned = await Task.detached { PhotoScanner.scan(folder: folder) }.value
             guard !scanned.isEmpty else {
@@ -127,6 +194,7 @@ final class AppModel {
                 merged[photo.id] = entry
             }
             self.photos = merged
+            try self.removeUnusedPatches(folder: folder)
 
             let savedGroups = saved?.groups ?? []
             let savedIDs = Set(savedGroups.flatMap(\.photoIDs))
@@ -207,23 +275,29 @@ final class AppModel {
     // MARK: - AI 选片
 
     func runAI(all: Bool) {
-        let client: VisionChatClient
+        Task {
+            guard let client = await makeVisionClient() else { return }
+            perform("AI 选片中…") { try await self.rankWithAI(client: client, all: all) }
+        }
+    }
+
+    /// 看图模型客户端，AI 选片和定位干扰物共用；配置有问题时弹提示并返回 nil
+    private func makeVisionClient() async -> VisionChatClient? {
+        let text = AppSettings.baseURL.trimmingCharacters(in: .whitespaces)
+        guard let baseURL = URL(string: text), baseURL.scheme?.hasPrefix("http") == true else {
+            alert = AlertInfo(title: "选片模型地址无效", message: "请在「AI选片 › 设置…」里检查接口地址：\(text)")
+            return nil
+        }
         do {
-            let text = AppSettings.baseURL.trimmingCharacters(in: .whitespaces)
-            guard let baseURL = URL(string: text), baseURL.scheme?.hasPrefix("http") == true else {
-                alert = AlertInfo(title: "选片模型地址无效", message: "请在「AI选片 › 设置…」里检查接口地址：\(text)")
-                return
-            }
-            client = VisionChatClient(
+            return VisionChatClient(
                 baseURL: baseURL,
-                apiKey: try KeychainStore.load(account: AppSettings.keychainAccount) ?? "",
+                apiKey: try await KeychainStore.loadIfSaved(account: AppSettings.keychainAccount) ?? "",
                 model: AppSettings.model
             )
         } catch {
             alert = AlertInfo(title: "读取 API 密钥失败", message: error.localizedDescription)
-            return
+            return nil
         }
-        perform("AI 选片中…") { try await self.rankWithAI(client: client, all: all) }
     }
 
     private struct BatchOutcome {
@@ -304,13 +378,30 @@ final class AppModel {
 
     func setDecision(_ decision: Decision, for id: String? = nil) {
         guard let id = id ?? selectedPhotoID else { return }
-        photos[id]?.decision = decision
-        photos[id]?.decidedByUser = true
+        setDecision(decision, for: [id])
+    }
+
+    /// 批量标记整批算一步撤销
+    func setDecision(_ decision: Decision, for ids: [String]) {
+        guard !ids.isEmpty else { return }
+        let label = decision == .pick ? "选用" : decision == .reject ? "淘汰" : "取消标记"
+        recordUndo(.decision, ids: ids, label: ids.count > 1 ? "\(label) \(ids.count) 张" : label)
+        for id in ids {
+            photos[id]?.decision = decision
+            photos[id]?.decidedByUser = true
+        }
         scheduleSave()
+    }
+
+    /// 网格里作用于选中的多张，大图里作用于当前照片
+    private var decisionTargets: [String] {
+        if gridMode, !gridSelection.isEmpty { return gridPhotoIDs.filter(gridSelection.contains) }
+        return selectedPhotoID.map { [$0] } ?? []
     }
 
     func setRating(_ rating: Int) {
         guard let id = selectedPhotoID else { return }
+        recordUndo(.decision, ids: [id], label: "星级")
         photos[id]?.rating = rating
         if rating > 0 { photos[id]?.decision = .pick }
         photos[id]?.decidedByUser = true
@@ -319,13 +410,17 @@ final class AppModel {
 
     func handleKey(_ characters: String) {
         switch characters.lowercased() {
-        case "p": setDecision(.pick)
-        case "x": setDecision(.reject)
-        case "u": setDecision(.none)
+        case "p": setDecision(.pick, for: decisionTargets)
+        case "x": setDecision(.reject, for: decisionTargets)
+        case "u": setDecision(.none, for: decisionTargets)
+        case "g": toggleGrid()
         case "f": showFaces.toggle()
-        case "\\": showOriginal.toggle()
+        case "\\": compareMode.toggle()
+        case "k": showPeaking.toggle()
+        case "j": showClipping.toggle()
         case "a": autoAdjustSelected()
         case "b": toggleBrush()
+        case "z": zoom.cycle()
         case "[": brushSize = max(0.005, brushSize / 1.25)
         case "]": brushSize = min(0.2, brushSize * 1.25)
         case "1", "2", "3", "4", "5": setRating(Int(characters) ?? 0)
@@ -336,8 +431,10 @@ final class AppModel {
 
     // MARK: - 调色
 
-    func updateEdit(_ edit: EditSettings) {
+    /// 滑块拖动时会连续调用，记录撤销由 beginEditChange 在拖动开始时做一次
+    func updateEdit(_ edit: EditSettings, recordingUndo label: String? = nil) {
         guard let id = selectedPhotoID else { return }
+        if let label { recordUndo(.edit, ids: [id], label: label) }
         photos[id]?.edit = edit == .neutral ? nil : edit
         scheduleSave()
     }
@@ -347,8 +444,8 @@ final class AppModel {
         perform("自动调色中…") {
             let url = photo.editURL, analysis = photo.analysis
             let edit = try await Task.detached { try AutoAdjuster.compute(url: url, analysis: analysis) }.value
+            self.recordUndo(.edit, ids: [photo.id], label: "自动调色")
             self.photos[photo.id]?.edit = edit
-            self.showOriginal = false
             self.scheduleSave()
         }
     }
@@ -356,6 +453,7 @@ final class AppModel {
     /// 同一组连拍光线一致，直接复用当前照片的参数，保证整组色调统一
     func syncEditToGroup() {
         guard let edit = selectedPhoto?.edit else { return }
+        recordUndo(.edit, ids: selectedPhotos.filter { $0.decision != .reject }.map(\.id), label: "同步到本组")
         for photo in selectedPhotos where photo.decision != .reject {
             photos[photo.id]?.edit = edit
         }
@@ -369,6 +467,7 @@ final class AppModel {
             alert = AlertInfo(title: "没有需要自动调色的照片", message: "已选照片都调过色了。想重新调整某张，选中后按 A。")
             return
         }
+        recordUndo(.edit, ids: targets.map(\.0), label: "已选照片自动调色")
         perform("自动调色中…") {
             for (index, (id, url, analysis)) in targets.enumerated() {
                 let edit = try await Task.detached { try AutoAdjuster.compute(url: url, analysis: analysis) }.value
@@ -454,6 +553,7 @@ final class AppModel {
     /// 把当前照片的风格设置套用到所有已选照片（保留各自的曝光等微调）
     func applyStyleToAllPicked() {
         guard let source = selectedPhoto?.edit else { return }
+        recordUndo(.edit, ids: photos.values.filter { $0.decision == .pick }.map(\.id), label: "套用风格到全部已选")
         for photo in photos.values where photo.decision == .pick {
             var edit = photo.edit ?? .neutral
             edit.styleID = source.styleID
@@ -468,7 +568,6 @@ final class AppModel {
 
     func toggleBrush() {
         brushMode.toggle()
-        zoomed = false
         if !brushMode { strokes = [] }
     }
 
@@ -481,49 +580,374 @@ final class AppModel {
         strokes[strokes.count - 1].points.append(point)
     }
 
-    func runCleanup() {
-        guard let photo = selectedPhoto, let folder = folderURL else { return }
+    /// 回车：消除当前照片的涂抹；⇧回车：整组同一位置一起消除
+    func runCleanup(wholeGroup: Bool = false) {
+        guard let photo = selectedPhoto else { return }
         guard !strokes.isEmpty else {
             alert = AlertInfo(title: "还没有涂抹", message: "按 B 进入画笔模式，在大图上涂抹要去掉的物体，再点「消除」。")
             return
         }
-        let provider: InpaintProvider
-        do {
-            provider = try InpaintService.makeProvider()
-        } catch {
-            alert = AlertInfo(title: "去杂物服务不可用", message: error.localizedDescription)
-            return
+        let targets = wholeGroup ? selectedPhotos.filter { $0.decision != .reject }.map(\.id) : [photo.id]
+        for id in targets {
+            enqueueCleanup(photoID: id, strokes: strokes, itemName: nil, isLarge: false)
         }
-        let strokes = self.strokes
-        perform("正在消除（云端补全，通常需要 20～60 秒）…") {
-            let patch = try await CleanupEngine.run(photo: photo, strokes: strokes, folder: folder, provider: provider)
-            // 先读后写：@Observable 属性在写入期间再读取同一属性会触发独占访问冲突而崩溃
-            let patches = (self.photos[photo.id]?.cleanups ?? []) + [patch]
-            self.photos[photo.id]?.cleanups = patches
-            if self.selectedPhotoID == photo.id { self.strokes = [] }
-            self.showOriginal = false
-            self.scheduleSave()
+        strokes = []
+    }
+
+    func enqueueCleanup(photoID: String, strokes: [BrushStroke], itemName: String?, isLarge: Bool) {
+        cleanupJobs.append(CleanupJob(photoID: photoID, strokes: strokes, itemName: itemName, isLarge: isLarge))
+        pumpCleanupQueue()
+    }
+
+    func isCleaning(_ photoID: String) -> Bool {
+        locatingPhotoIDs.contains(photoID) || cleanupJobs.contains { $0.photoID == photoID }
+    }
+
+    // MARK: - 一键去干扰物 / 一键初修
+
+    /// 单张：让 AI 找出干扰物，背景杂物直接排队去除，主体相关物品只记录
+    func removeDistractions() {
+        guard let id = selectedPhotoID else { return }
+        Task {
+            guard let client = await makeVisionClient() else { return }
+            await locateAndRemove(photoID: id, client: client)
         }
     }
 
+    /// 消除区域超过画面的 4% 时提示检查：大面积补全更容易出错
+    private static let largeAreaThreshold: CGFloat = 0.04
+
+    @discardableResult
+    private func locateAndRemove(photoID: String, client: VisionChatClient) async -> Bool {
+        guard let photo = photos[photoID] else { return false }
+        let url = photo.displayURL, hints = photo.ai?.distractions ?? []
+        locatingPhotoIDs.insert(photoID)
+        defer { locatingPhotoIDs.remove(photoID) }
+        do {
+            let locator = DistractionLocator(client: client)
+            async let items = locator.locate(imageURL: url, hints: hints)
+            async let size = Task.detached { ImageLoader.orientedPixelSize(at: url) }.value
+            let (found, pixelSize) = try await (items, size)
+            guard photos[photoID] != nil else { return false }
+            let aspect = pixelSize.map { $0.width / $0.height } ?? 1.5
+            for item in found {
+                if item.isBackground {
+                    enqueueCleanup(
+                        photoID: photoID,
+                        strokes: DistractionLocator.strokes(covering: item.box, imageAspect: aspect),
+                        itemName: item.name,
+                        isLarge: item.box.width * item.box.height > Self.largeAreaThreshold
+                    )
+                } else {
+                    appendLog(photoID) { $0.kept.append(item.name) }
+                }
+            }
+            if !found.contains(where: \.isBackground) {
+                appendLog(photoID) { $0.actions.append("没有发现需要去除的干扰物") }
+            }
+            scheduleSave()
+            return true
+        } catch {
+            appendLog(photoID) { $0.warnings.append("识别干扰物失败：\(error.localizedDescription)") }
+            scheduleSave()
+            return false
+        }
+    }
+
+    /// 一键初修：对所有已选照片全自动处理，不需要事先过目；完成后给出总结
+    func startQuickRetouch(styleID: UUID?) {
+        let targets = photos.values.filter { $0.decision == .pick }.sorted { $0.id < $1.id }
+        guard !targets.isEmpty else {
+            alert = AlertInfo(title: "还没有已选照片", message: "先选用照片（P），再做一键初修。")
+            return
+        }
+        Task { await runQuickRetouch(targets, styleID: styleID) }
+    }
+
+    private func runQuickRetouch(_ targets: [Photo], styleID: UUID?) async {
+        guard let client = await makeVisionClient() else { return }
+        recordUndo(.edit, ids: targets.map(\.id), label: "一键初修")
+        for photo in targets { photos[photo.id]?.retouchLog = RetouchLog() }
+        retouchProgress = (0, targets.count)
+        let styleName = styles.first { $0.id == styleID }?.name
+
+        await withTaskGroup(of: Void.self) { group in
+            var next = 0
+            func enqueue() {
+                guard next < targets.count else { return }
+                let photo = targets[next]
+                next += 1
+                group.addTask { await self.retouch(photo, styleID: styleID, styleName: styleName, client: client) }
+            }
+            // 每张要调用看图模型定位干扰物，并发 3 个
+            for _ in 0..<min(3, targets.count) { enqueue() }
+            for await _ in group {
+                if let progress = retouchProgress { retouchProgress = (progress.done + 1, progress.total) }
+                enqueue()
+            }
+        }
+        scheduleSave()
+        // 去杂物还在后台排队时，等它们做完再弹总结
+        while !cleanupJobs.isEmpty { try? await Task.sleep(for: .seconds(1)) }
+        retouchProgress = nil
+        showRetouchSummary = true
+    }
+
+    private func retouch(_ photo: Photo, styleID: UUID?, styleName: String?, client: VisionChatClient) async {
+        // 调色：手动修过的保留，不覆盖摄影师的调整
+        if let existing = photo.edit {
+            appendLog(photo.id) { $0.actions.append("已有手动修图，保留原调整") }
+            if let styleID, existing.styleID == nil {
+                var edit = existing
+                edit.styleID = styleID
+                photos[photo.id]?.edit = edit
+                appendLog(photo.id) { $0.actions.append("套用风格「\(styleName ?? "")」") }
+            }
+        } else {
+            let url = photo.editURL, analysis = photo.analysis
+            do {
+                var edit = try await Task.detached { try AutoAdjuster.compute(url: url, analysis: analysis) }.value
+                if analysis?.faces.contains(where: { $0.features != nil }) == true { edit.skinSmoothing = 0.25 }
+                edit.styleID = styleID
+                photos[photo.id]?.edit = edit
+                appendLog(photo.id) { $0.actions.append(contentsOf: Self.describe(edit, styleName: styleName)) }
+            } catch {
+                appendLog(photo.id) { $0.warnings.append("自动调色失败：\(error.localizedDescription)") }
+            }
+        }
+        // 初修修不了的问题：来自本地检测和 AI 选片
+        let unfixable = photo.flags.map { "\($0.label)，初修无法修复" } + (photo.ai?.issues ?? [])
+        if !unfixable.isEmpty { appendLog(photo.id) { $0.unfixable.append(contentsOf: unfixable) } }
+        await locateAndRemove(photoID: photo.id, client: client)
+    }
+
+    private static func describe(_ edit: EditSettings, styleName: String?) -> [String] {
+        var parts: [String] = []
+        if abs(edit.exposure) >= 0.05 { parts.append(String(format: "曝光 %+.2f EV", edit.exposure)) }
+        if edit.temperature != 6500 || edit.tint != 0 {
+            parts.append(edit.temperature > 6500 ? "白平衡校正（偏冷 → 回暖）" : "白平衡校正（偏暖 → 中性）")
+        }
+        if edit.highlights < 0 { parts.append("压暗高光") }
+        if edit.shadows > 0 { parts.append("提亮阴影") }
+        if edit.skinSmoothing > 0 { parts.append("皮肤轻度柔化") }
+        if let styleName, edit.styleID != nil { parts.append("套用风格「\(styleName)」") }
+        return parts.isEmpty ? ["曝光和白平衡正常，未调整"] : parts
+    }
+
+    /// 同一张照片的任务按顺序做（后一次要叠在前一次的结果上），不同照片可以并行
+    private func pumpCleanupQueue() {
+        guard let folder = folderURL else { return }
+        while cleanupJobs.filter(\.isRunning).count < Self.cleanupConcurrency,
+              let index = cleanupJobs.firstIndex(where: { job in
+                  !job.isRunning && !cleanupJobs.contains { $0.isRunning && $0.photoID == job.photoID }
+              }) {
+            cleanupJobs[index].isRunning = true
+            let job = cleanupJobs[index]
+            Task { await runCleanupJob(job, folder: folder) }
+        }
+    }
+
+    private func runCleanupJob(_ job: CleanupJob, folder: URL) async {
+        let outcome: Result<CleanupPatch, Error>
+        do {
+            guard let photo = photos[job.photoID] else { throw CleanupEngine.CleanupError.unreadable }
+            let provider = try await InpaintService.makeProvider()
+            outcome = .success(try await CleanupEngine.run(photo: photo, strokes: job.strokes, folder: folder, provider: provider))
+        } catch {
+            outcome = .failure(error)
+        }
+        cleanupJobs.removeAll { $0.id == job.id }
+        // 等待期间换了文件夹：结果属于旧文件夹，丢弃（修补文件留在旧文件夹，下次打开时清理）
+        guard folderURL == folder, photos[job.photoID] != nil else { return }
+
+        let name = photos[job.photoID]?.fileName ?? job.photoID
+        switch outcome {
+        case .success(let patch):
+            // 先读后写：@Observable 属性在写入期间再读取同一属性会触发独占访问冲突而崩溃
+            let patches = (photos[job.photoID]?.cleanups ?? []) + [patch]
+            recordUndo(.cleanups, ids: [job.photoID], label: job.itemName.map { "去掉\($0)" } ?? "去杂物")
+            photos[job.photoID]?.cleanups = patches
+            if let item = job.itemName {
+                appendLog(job.photoID) {
+                    if job.isLarge {
+                        $0.warnings.append("去掉了\(item)，消除区域较大，建议对比检查")
+                    } else {
+                        $0.actions.append("去掉了\(item)")
+                    }
+                }
+            }
+        case .failure(let error):
+            cleanupFailures.append("\(name)：\(error.localizedDescription)")
+            if let item = job.itemName {
+                appendLog(job.photoID) { $0.warnings.append("去掉\(item)失败：\(error.localizedDescription)") }
+            }
+        }
+        scheduleSave()
+        pumpCleanupQueue()
+        if cleanupJobs.isEmpty, !cleanupFailures.isEmpty {
+            alert = AlertInfo(
+                title: "\(cleanupFailures.count) 处去杂物失败",
+                message: cleanupFailures.prefix(5).joined(separator: "\n") + (cleanupFailures.count > 5 ? "\n…" : "")
+            )
+            cleanupFailures = []
+        }
+    }
+
+    private func appendLog(_ photoID: String, _ change: (inout RetouchLog) -> Void) {
+        var log = photos[photoID]?.retouchLog ?? RetouchLog()
+        change(&log)
+        photos[photoID]?.retouchLog = log
+    }
+
     func undoCleanup() {
-        guard let id = selectedPhotoID, let folder = folderURL,
-              var patches = photos[id]?.cleanups, let last = patches.popLast()
-        else { return }
+        guard let id = selectedPhotoID, var patches = photos[id]?.cleanups, !patches.isEmpty else { return }
+        recordUndo(.cleanups, ids: [id], label: "撤销上一次消除")
+        patches.removeLast()
         photos[id]?.cleanups = patches.isEmpty ? nil : patches
         scheduleSave()
-        do {
-            try FileManager.default.removeItem(at: CleanupEngine.patchURL(last.id, folder: folder))
-        } catch {
-            alert = AlertInfo(title: "已撤销，但修补文件没能删除", message: error.localizedDescription)
+    }
+
+    // MARK: - 放大
+
+    /// 空格：适应窗口时放大到 100% 并对准人脸（没有人脸时对准人体），已放大时回到适应窗口
+    func zoomToFocus() {
+        guard zoom.pixelRatio == nil else {
+            zoom.pixelRatio = nil
+            return
         }
+        let focus = selectedPhoto?.analysis?.focusRect
+        zoom = ZoomState(pixelRatio: 1, center: focus.map { CGPoint(x: $0.midX, y: $0.midY) } ?? CGPoint(x: 0.5, y: 0.5))
+    }
+
+    // MARK: - 撤销 / 重做
+
+    /// 在改动前调用：记下这些照片该类字段的旧值，并清空重做记录
+    private func recordUndo(_ kind: UndoKind, ids: [String], label: String) {
+        guard !ids.isEmpty else { return }
+        let before = Dictionary(uniqueKeysWithValues: ids.compactMap { id in photos[id].map { (id, $0) } })
+        undoStack.append(UndoEntry(kind: kind, label: label, before: before))
+        redoStack = []
+    }
+
+    /// 滑块开始拖动时记一次，整次拖动算一步
+    func beginEditChange(_ label: String) {
+        guard let id = selectedPhotoID else { return }
+        recordUndo(.edit, ids: [id], label: label)
+    }
+
+    func undo() {
+        // 画笔模式下先撤销还没消除的笔触
+        if brushMode, !strokes.isEmpty {
+            strokes.removeLast()
+            return
+        }
+        guard let entry = undoStack.popLast() else { return }
+        redoStack.append(swap(entry))
+        scheduleSave()
+    }
+
+    func redo() {
+        guard let entry = redoStack.popLast() else { return }
+        undoStack.append(swap(entry))
+        scheduleSave()
+    }
+
+    /// 用记录里的旧值替换当前值，返回替换前的当前值，供反方向操作使用
+    private func swap(_ entry: UndoEntry) -> UndoEntry {
+        var current: [String: Photo] = [:]
+        for (id, saved) in entry.before {
+            guard var photo = photos[id] else { continue }
+            current[id] = photo
+            switch entry.kind {
+            case .decision:
+                photo.decision = saved.decision
+                photo.decidedByUser = saved.decidedByUser
+                photo.rating = saved.rating
+            case .edit:
+                photo.edit = saved.edit
+            case .cleanups:
+                photo.cleanups = saved.cleanups
+            }
+            photos[id] = photo
+        }
+        // 撤销后跳到受影响的照片，让用户看到改了什么
+        if let id = entry.before.keys.first, entry.before.count == 1, let group = groups.first(where: { $0.photoIDs.contains(id) }) {
+            selectGroup(group.id, photoID: id)
+        }
+        return UndoEntry(kind: entry.kind, label: entry.label, before: current)
+    }
+
+    /// 撤销去杂物后修补文件仍保留（以便重做），换文件夹时清掉不再被引用的修补文件
+    private func removeUnusedPatches(folder: URL) throws {
+        let directory = CleanupEngine.patchDirectory(folder: folder)
+        guard FileManager.default.fileExists(atPath: directory.path) else { return }
+        let used = Set(photos.values.flatMap { $0.cleanups ?? [] }.map { "\($0.id.uuidString).png" })
+        for file in try FileManager.default.contentsOfDirectory(atPath: directory.path) where !used.contains(file) {
+            try FileManager.default.removeItem(at: directory.appendingPathComponent(file))
+        }
+    }
+
+    // MARK: - 网格总览
+
+    /// 网格里的照片顺序：按当前筛选下的组依次排列
+    var gridPhotoIDs: [String] { visibleGroups.flatMap(\.photoIDs) }
+
+    func toggleGrid() {
+        gridMode.toggle()
+        brushMode = false
+        strokes = []
+        if gridMode { gridSelection = selectedPhotoID.map { [$0] } ?? [] }
+    }
+
+    /// 单击选中一张；⌘ 单击增减；⇧ 单击选中连续范围
+    func gridClick(_ id: String, command: Bool, shift: Bool) {
+        if shift, let anchor = selectedPhotoID {
+            let order = gridPhotoIDs
+            if let a = order.firstIndex(of: anchor), let b = order.firstIndex(of: id) {
+                gridSelection.formUnion(order[min(a, b)...max(a, b)])
+            }
+        } else if command {
+            if gridSelection.contains(id) { gridSelection.remove(id) } else { gridSelection.insert(id) }
+        } else {
+            gridSelection = [id]
+        }
+        moveCurrent(to: id)
+    }
+
+    /// 框选：按住 ⌘ 时在已有选择上追加
+    func gridMarquee(_ ids: Set<String>, adding: Bool) {
+        gridSelection = adding ? gridSelection.union(ids) : ids
+        if let first = gridPhotoIDs.first(where: ids.contains) { moveCurrent(to: first) }
+    }
+
+    /// 方向键在网格里移动：左右一张，上下一组
+    func gridStep(by delta: Int) {
+        let order = gridPhotoIDs
+        guard let index = order.firstIndex(where: { $0 == selectedPhotoID }) ?? order.indices.first else { return }
+        let target = order[min(order.count - 1, max(0, index + delta))]
+        gridSelection = [target]
+        moveCurrent(to: target)
+    }
+
+    func gridStepGroup(by delta: Int) {
+        stepGroup(by: delta)
+        gridSelection = selectedPhotoID.map { [$0] } ?? []
+    }
+
+    func openInViewer(_ id: String) {
+        moveCurrent(to: id)
+        gridMode = false
+    }
+
+    private func moveCurrent(to id: String) {
+        guard let group = groups.first(where: { $0.photoIDs.contains(id) }) else { return }
+        selectGroup(group.id, photoID: id)
     }
 
     // MARK: - 导航
 
     func selectGroup(_ id: Int?, photoID: String? = nil) {
         selectedGroupID = id
-        zoomed = false
         strokes = []
         guard let group = selectedGroup else {
             selectedPhotoID = nil
@@ -534,7 +958,6 @@ final class AppModel {
 
     func selectPhoto(_ id: String) {
         selectedPhotoID = id
-        zoomed = false
         strokes = []
     }
 

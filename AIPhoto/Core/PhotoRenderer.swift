@@ -52,13 +52,13 @@ enum PhotoRenderer {
         return output
     }
 
-    /// 全尺寸原图：RAW 完整解码（画质好于内嵌预览），解码不了时退回同名 JPG
+    /// 全尺寸修图底图，与 Photo.editURL 一致：有相机 JPG 用 JPG，只有 RAW 时完整解码 RAW
     static func fullResolution(of photo: Photo) -> CIImage? {
-        if let raw = photo.rawURL, let image = CIRAWFilter(imageURL: raw)?.outputImage {
-            return image
+        if let jpg = photo.renderedURL {
+            return CIImage(contentsOf: jpg, options: [.applyOrientationProperty: true])
         }
-        guard let url = photo.renderedURL ?? photo.rawURL else { return nil }
-        return CIImage(contentsOf: url, options: [.applyOrientationProperty: true])
+        guard let raw = photo.rawURL else { return nil }
+        return CIRAWFilter(imageURL: raw)?.outputImage
     }
 
     static func exportJPEG(_ photo: Photo, folder: URL, to url: URL, quality: Double) throws {

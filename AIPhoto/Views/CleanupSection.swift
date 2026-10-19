@@ -13,11 +13,31 @@ struct CleanupSection: View {
                 .toggleStyle(.button)
                 Button("消除 ↩") { model.runCleanup() }
                     .disabled(model.strokes.isEmpty)
-                Button("清除涂抹") { model.strokes = [] }
+                Button("整组消除 ⇧↩") { model.runCleanup(wholeGroup: true) }
+                    .disabled(model.strokes.isEmpty)
+                    .help("同组连拍里未淘汰的照片，在同一位置一起消除")
+                Button("清除") { model.strokes = [] }
                     .disabled(model.strokes.isEmpty)
             }
             .buttonStyle(.bordered)
-            .disabled(model.isBusy)
+
+            Button {
+                model.removeDistractions()
+            } label: {
+                Label("一键去掉干扰物", systemImage: "sparkles")
+            }
+            .buttonStyle(.bordered)
+            .disabled(model.isCleaning(photo.id))
+            .help("AI 找出推车、杂物、电线、路人等背景杂物并自动去掉；孩子手里的东西不动")
+
+            if model.isCleaning(photo.id) {
+                HStack(spacing: 6) {
+                    ProgressView().controlSize(.small)
+                    Text(model.locatingPhotoIDs.contains(photo.id) ? "正在识别干扰物位置…" : "这张正在后台去杂物，可以继续看别的照片")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
 
             if model.brushMode {
                 VStack(alignment: .leading, spacing: 2) {
@@ -38,7 +58,6 @@ struct CleanupSection: View {
                     Text("已消除 \(count) 处")
                     Spacer()
                     Button("撤销上一次") { model.undoCleanup() }
-                        .disabled(model.isBusy)
                 }
             }
 

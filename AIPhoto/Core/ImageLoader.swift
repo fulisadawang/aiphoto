@@ -26,8 +26,8 @@ enum ImageLoader {
         return CGImageSourceCreateThumbnailAtIndex(source, 0, options as CFDictionary)
     }
 
-    /// 修图用的底图：RAW 用 CIRAWFilter 解码（与导出成片一致），其他格式同 image(at:)。
-    /// RAW 内嵌预览是相机套了照片风格的 JPG，和 RAW 解码观感不同，在它上面调色会导致预览与导出不一致
+    /// 修图用的底图（传入 Photo.editURL）：只有 RAW 时用 CIRAWFilter 解码，与导出成片一致；JPG 同 image(at:)。
+    /// RAW 内嵌预览是相机套了照片风格的 JPG，和 RAW 解码观感不同，纯 RAW 照片不能拿它当底图
     static func editBase(at url: URL, maxPixel: Int) -> CGImage? {
         guard PhotoScanner.rawExtensions.contains(url.pathExtension.lowercased()),
               let raw = CIRAWFilter(imageURL: url)
@@ -35,6 +35,18 @@ enum ImageLoader {
         raw.scaleFactor = Float(min(1, Double(maxPixel) / max(raw.nativeSize.width, raw.nativeSize.height)))
         guard let output = raw.outputImage else { return nil }
         return PhotoRenderer.context.createCGImage(output, from: output.extent, format: .RGBA8, colorSpace: PhotoRenderer.sRGB)
+    }
+
+    /// 方向转正后的原图像素尺寸（只读元数据，不解码）
+    static func orientedPixelSize(at url: URL) -> CGSize? {
+        guard let source = CGImageSourceCreateWithURL(url as CFURL, nil),
+              let props = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any],
+              let width = props[kCGImagePropertyPixelWidth] as? Int,
+              let height = props[kCGImagePropertyPixelHeight] as? Int
+        else { return nil }
+        // 方向 5～8 表示旋转了 90°，宽高互换
+        let rotated = ((props[kCGImagePropertyOrientation] as? Int) ?? 1) >= 5
+        return rotated ? CGSize(width: height, height: width) : CGSize(width: width, height: height)
     }
 
     static func captureDate(at url: URL) -> Date? {

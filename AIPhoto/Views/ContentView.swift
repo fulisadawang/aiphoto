@@ -17,6 +17,9 @@ struct ContentView: View {
                 } else if model.groups.isEmpty {
                     ProgressView(model.statusText.isEmpty ? "准备中…" : model.statusText)
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
+                } else if model.gridMode {
+                    GridView()
+                        .onTapGesture { viewerFocused = true }
                 } else if let photo = model.selectedPhoto {
                     PhotoViewer(photo: photo)
                         .onTapGesture { viewerFocused = true }
@@ -37,18 +40,22 @@ struct ContentView: View {
             InspectorView()
                 .inspectorColumnWidth(min: 260, ideal: 300, max: 380)
         }
-        .onKeyPress(.leftArrow) { model.previousPhoto(); return .handled }
-        .onKeyPress(.rightArrow) { model.nextPhoto(); return .handled }
-        .onKeyPress(.upArrow) { model.previousGroup(); return .handled }
-        .onKeyPress(.downArrow) { model.nextGroup(); return .handled }
+        .onKeyPress(.leftArrow) { model.gridMode ? model.gridStep(by: -1) : model.previousPhoto(); return .handled }
+        .onKeyPress(.rightArrow) { model.gridMode ? model.gridStep(by: 1) : model.nextPhoto(); return .handled }
+        .onKeyPress(.upArrow) { model.gridMode ? model.gridStepGroup(by: -1) : model.previousGroup(); return .handled }
+        .onKeyPress(.downArrow) { model.gridMode ? model.gridStepGroup(by: 1) : model.nextGroup(); return .handled }
         .onKeyPress(.space) {
             guard !model.brushMode else { return .ignored }
-            model.zoomed.toggle()
+            model.zoomToFocus()
             return .handled
         }
-        .onKeyPress(.return) {
+        .onKeyPress(keys: [.return]) { press in
+            if model.gridMode, let id = model.selectedPhotoID {
+                model.openInViewer(id)
+                return .handled
+            }
             guard model.brushMode, !model.strokes.isEmpty else { return .ignored }
-            model.runCleanup()
+            model.runCleanup(wholeGroup: press.modifiers.contains(.shift))
             return .handled
         }
         .onKeyPress(.escape) {
@@ -56,7 +63,7 @@ struct ContentView: View {
             if model.strokes.isEmpty { model.toggleBrush() } else { model.strokes = [] }
             return .handled
         }
-        .onKeyPress(characters: CharacterSet(charactersIn: "pxufabPXUFAB012345\\[]")) { press in
+        .onKeyPress(characters: CharacterSet(charactersIn: "pxufabzkjgPXUFABZKJG012345\\[]")) { press in
             model.handleKey(press.characters)
             return .handled
         }
@@ -86,6 +93,20 @@ struct ContentView: View {
                 .disabled(model.groups.isEmpty || model.isBusy)
                 .help("把每组候选照片发给 AI 选片模型，挑出最值得交付的")
 
+                Toggle(isOn: Binding(get: { model.gridMode }, set: { _ in model.toggleGrid() })) {
+                    Label("网格总览", systemImage: "square.grid.3x3")
+                }
+                .help("G：一屏看完整场照片，可框选批量选用 / 淘汰")
+                .disabled(model.groups.isEmpty)
+
+                Button {
+                    model.showRetouchStart = true
+                } label: {
+                    Label("一键初修", systemImage: "wand.and.stars.inverse")
+                }
+                .disabled(model.pickedCount == 0 || model.retouchProgress != nil)
+                .help("对所有已选照片全自动初修：调色、皮肤轻度柔化、去背景杂物，完成后给出总结")
+
                 Menu {
                     Button("把选片结果写入 RAW 的 XMP 星级") { model.writeXMP() }
                     Button("拷贝已选照片到文件夹…") { model.copyPicked() }
@@ -101,6 +122,8 @@ struct ContentView: View {
                 }
             }
         }
+        .sheet(isPresented: $model.showRetouchStart) { RetouchStartSheet().environment(model) }
+        .sheet(isPresented: $model.showRetouchSummary) { RetouchSummaryView().environment(model) }
         .alert(item: $model.alert) { info in
             Alert(title: Text(info.title), message: Text(info.message))
         }
@@ -118,10 +141,25 @@ struct StatusBar: View {
                     .frame(width: 160)
                 Text(model.statusText)
             } else if !model.groups.isEmpty {
-                Text("← → 切换照片　↑ ↓ 切换组　P 选用　X 淘汰　U 取消　1-5 星级　空格 放大人脸　F 人脸框　A 自动调色　\\ 对比原图　B 画笔去杂物")
+                Text("← → 切换照片　↑ ↓ 切换组　P 选用　X 淘汰　U 取消　1-5 星级　空格 放大人脸　F 人脸框　A 自动调色　\\ 修复前后对比　B 画笔去杂物　Z 缩放　K 合焦高亮　J 过曝提示　G 网格总览")
                     .foregroundStyle(.secondary)
             }
             Spacer()
+            if let progress = model.retouchProgress {
+                HStack(spacing: 6) {
+                    ProgressView(value: Double(progress.done), total: Double(max(1, progress.total)))
+                        .frame(width: 100)
+                    Text("初修 \(progress.done)/\(progress.total)")
+                        .monospacedDigit()
+                }
+            }
+            if !model.cleanupJobs.isEmpty {
+                let running = model.cleanupJobs.filter(\.isRunning).count
+                HStack(spacing: 6) {
+                    ProgressView().controlSize(.small)
+                    Text("去杂物：进行中 \(running) · 排队 \(model.cleanupJobs.count - running)")
+                }
+            }
             if !model.photos.isEmpty {
                 Text("共 \(model.photos.count) 张 · \(model.groups.count) 组 · AI 已评 \(model.aiReviewedGroupCount) 组 · 已选 \(model.pickedCount) · 淘汰 \(model.rejectedCount)")
                     .monospacedDigit()

@@ -96,12 +96,8 @@ struct SettingsView: View {
     }
 
     private func loadKeyStatus() {
-        do {
-            keyStatus = try KeychainStore.load(account: AppSettings.keychainAccount) == nil ? "未设置" : "已保存"
-            inpaintKeyStatus = try KeychainStore.load(account: InpaintService.keychainAccount) == nil ? "未设置" : "已保存"
-        } catch {
-            keyStatus = error.localizedDescription
-        }
+        keyStatus = KeychainStore.isSaved(account: AppSettings.keychainAccount) ? "已保存" : "未设置"
+        inpaintKeyStatus = KeychainStore.isSaved(account: InpaintService.keychainAccount) ? "已保存" : "未设置"
     }
 
     private func saveInpaintKey() {
