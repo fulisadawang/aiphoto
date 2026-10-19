@@ -132,7 +132,7 @@ struct ContentView: View {
         .alert(item: $model.alert) { info in
             Alert(title: Text(info.title), message: Text(info.message))
         }
-        .navigationTitle(model.folderURL?.lastPathComponent ?? "AI 选片")
+        .navigationTitle(model.folderURL?.lastPathComponent ?? "小宇专属")
     }
 }
 

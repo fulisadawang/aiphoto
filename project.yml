@@ -20,8 +20,8 @@ targets:
     info:
       path: AIPhoto/Info.plist
       properties:
-        CFBundleName: AI选片
-        CFBundleDisplayName: AI选片
+        CFBundleName: 小宇专属
+        CFBundleDisplayName: 小宇专属
         CFBundleShortVersionString: "$(MARKETING_VERSION)"
         CFBundleVersion: "$(CURRENT_PROJECT_VERSION)"
         LSApplicationCategoryType: public.app-category.photography
@@ -43,7 +43,9 @@ targets:
             LSItemContentTypes: [public.folder]
     settings:
       base:
+        # 显示名见 CFBundleDisplayName；产品名和 bundle id 不改，改了会断掉 Sparkle 更新和已有设置
         PRODUCT_NAME: AIPhoto
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         PRODUCT_BUNDLE_IDENTIFIER: com.nieyutan.aiphoto
         SWIFT_VERSION: "5.0"
         MARKETING_VERSION: "0.2.0"

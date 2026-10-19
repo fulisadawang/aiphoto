@@ -40,7 +40,7 @@ struct AIPhotoApp: App {
 
     var body: some Scene {
         // 只有一份选片数据，用单窗口；用 WindowGroup 时从访达或 open 命令打开文件夹会多开窗口
-        Window("AI 选片", id: "main") {
+        Window("小宇专属", id: "main") {
             ContentView()
                 .environment(model)
                 .frame(minWidth: 1100, minHeight: 700)

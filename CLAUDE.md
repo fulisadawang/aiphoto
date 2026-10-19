@@ -1,5 +1,7 @@
 # AI选片（aiphoto）
 
+App 显示名为「小宇专属」（2026-10-20 用户改名，`CFBundleDisplayName`）；工程名、`PRODUCT_NAME`（AIPhoto）和 bundle id（`com.nieyutan.aiphoto`）不改，改了会断掉 Sparkle 更新和已有设置。图标在 `AIPhoto/Assets.xcassets/AppIcon.appiconset`（AI 生成的红色草顶小木屋，已裁成 macOS 圆角方形）。
+
 摄影师自用的 Mac 原生选片与修图客户端，场景是亲子 / 家庭纪实拍摄（RAW+JPG 混拍）。仅本人自用：不需要服务器、账号、计费，也不上架。用户使用说明见 `README.md`。
 
 产品定位（2026-10-19 用户决定）：核心是**选片 + 去杂物**，选中的照片交给像素蛋糕精修。**不再以替代像素蛋糕为目标**，不要主动推进人像精修类功能；新需求以用户实际使用中提出的小改进为主。

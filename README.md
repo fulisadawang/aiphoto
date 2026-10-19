@@ -1,4 +1,4 @@
-# AI选片
+# 小宇专属（AI选片）
 
 给亲子 / 家庭纪实摄影师用的 Mac 原生选片客户端。拍完一场几百张 RAW+JPG，用它快速分组、挑片、做第一遍修复（调色、去路人杂物），选中的照片再交给 Lightroom、像素蛋糕等软件精修。
 
@@ -24,7 +24,7 @@ SwiftUI + Core Image + Vision 实现，AI 部分调用任何 OpenAI 兼容接口
 
 ## 安装与更新
 
-从 [Releases](https://github.com/fulisadawang/aiphoto/releases) 下载 `AIPhoto-<版本>.zip`，解压后把 `AIPhoto.app` 拖进「应用程序」。App 没有 Apple 开发者签名，第一次打开会被系统拦截：在「系统设置 › 隐私与安全性」里点「仍要打开」。之后 App 会自动检查更新（也可以在「AI选片 › 检查更新…」手动检查），确认后自动下载、校验签名并重启。
+从 [Releases](https://github.com/fulisadawang/aiphoto/releases) 下载 `AIPhoto-<版本>.zip`，解压后把 `AIPhoto.app` 拖进「应用程序」。App 没有 Apple 开发者签名，第一次打开会被系统拦截：在「系统设置 › 隐私与安全性」里点「仍要打开」。之后 App 会自动检查更新（也可以在「小宇专属 › 检查更新…」手动检查），确认后自动下载、校验签名并重启。
 
 ## 编译运行
 
@@ -38,7 +38,7 @@ open build/DerivedData/Build/Products/Release/AIPhoto.app
 
 ## 模型服务配置
 
-在「AI选片 › 设置…」里配置，默认值指向作者本机运行的 Magpie 模型网关（`http://127.0.0.1:3425/v1`，不需要密钥）：
+在「小宇专属 › 设置…」里配置，默认值指向作者本机运行的 Magpie 模型网关（`http://127.0.0.1:3425/v1`，不需要密钥）：
 
 | 用途 | 接口 | 默认模型 | 说明 |
 |---|---|---|---|

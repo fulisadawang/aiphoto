@@ -293,7 +293,7 @@ final class AppModel {
     private func makeVisionClient(model: String = AppSettings.model) async -> VisionChatClient? {
         let text = AppSettings.baseURL.trimmingCharacters(in: .whitespaces)
         guard let baseURL = URL(string: text), baseURL.scheme?.hasPrefix("http") == true else {
-            alert = AlertInfo(title: "选片模型地址无效", message: "请在「AI选片 › 设置…」里检查接口地址：\(text)")
+            alert = AlertInfo(title: "选片模型地址无效", message: "请在「小宇专属 › 设置…」里检查接口地址：\(text)")
             return nil
         }
         do {

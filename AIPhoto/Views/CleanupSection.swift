@@ -67,7 +67,7 @@ struct CleanupSection: View {
                     .foregroundStyle(.secondary)
             }
             if InpaintService.current == .none {
-                Text("还没有配置去杂物服务，请在「AI选片 › 设置…」里配置。")
+                Text("还没有配置去杂物服务，请在「小宇专属 › 设置…」里配置。")
                     .font(.caption)
                     .foregroundStyle(.orange)
             }

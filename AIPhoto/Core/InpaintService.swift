@@ -38,7 +38,7 @@ enum InpaintService: String, CaseIterable, Identifiable {
         case invalidBaseURL(String)
         var errorDescription: String? {
             switch self {
-            case .notConfigured: "还没有配置去杂物服务，请在「AI选片 › 设置…」里选择服务。"
+            case .notConfigured: "还没有配置去杂物服务，请在「小宇专属 › 设置…」里选择服务。"
             case .invalidBaseURL(let text): "去杂物服务地址无效：\(text)"
             }
         }
