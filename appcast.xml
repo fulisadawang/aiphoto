@@ -3,6 +3,22 @@
     <channel>
         <title>AIPhoto</title>
         <item>
+            <title>0.8.4</title>
+            <pubDate>Tue, 20 Oct 2026 23:14:12 +0800</pubDate>
+            <sparkle:version>13</sparkle:version>
+            <sparkle:shortVersionString>0.8.4</sparkle:shortVersionString>
+            <sparkle:minimumSystemVersion>15.0</sparkle:minimumSystemVersion>
+            <sparkle:hardwareRequirements>arm64</sparkle:hardwareRequirements>
+            <description sparkle:format="markdown"><![CDATA[## 推荐模型改为「视觉修图」
+
+- AI 选片、找杂物、对话改图默认改用 Magpie 新增的「视觉修图」模型组：实拍 31 张选片 18 秒完成，找杂物框得准
+- 原来的 Gemini 改为备用，推荐模型出错时自动换它
+- 之前在设置里用着旧推荐的，升级后自动换成新推荐；自己选过别的模型的保持不变
+- 一键初修找杂物时，虚化的前景树叶、枝条不再去除
+]]></description>
+            <enclosure url="https://github.com/fulisadawang/aiphoto/releases/download/v0.8.4/AIPhoto-0.8.4.zip" length="5682454" type="application/octet-stream" sparkle:edSignature="wELMWBVjYrU1weH1kkKhEaSfh/RoJVWm3H084Jd2jLkAeXpGoF5eBt5bCusDY9zArbqLXNmPKc4+TSvBxqZAAA=="/>
+        </item>
+        <item>
             <title>0.8.3</title>
             <pubDate>Tue, 20 Oct 2026 22:42:14 +0800</pubDate>
             <sparkle:version>12</sparkle:version>
@@ -31,22 +47,6 @@
 - 设置里的接口地址可以填任意 http 地址（局域网其他电脑、域名都可以）
 ]]></description>
             <enclosure url="https://github.com/fulisadawang/aiphoto/releases/download/v0.8.2/AIPhoto-0.8.2.zip" length="5665909" type="application/octet-stream" sparkle:edSignature="XP9Od876XKXv3xaOpp0VrUa2/tXaaY38FbNbcXCZLs4CmtZX/Yvzkp2gzXSnY2kFtISC55wlifvHFlY5gi6nBw=="/>
-        </item>
-        <item>
-            <title>0.8.1</title>
-            <pubDate>Tue, 20 Oct 2026 19:15:39 +0800</pubDate>
-            <sparkle:version>10</sparkle:version>
-            <sparkle:shortVersionString>0.8.1</sparkle:shortVersionString>
-            <sparkle:minimumSystemVersion>15.0</sparkle:minimumSystemVersion>
-            <sparkle:hardwareRequirements>arm64</sparkle:hardwareRequirements>
-            <description sparkle:format="markdown"><![CDATA[## 三个档位全部开放
-
-- 设置 › AI 服务里「省钱」「效果优先」现在可以直接选：
-  - 省钱：AI 选片换成更便宜的模型，找杂物和对话改图仍用准的 Gemini
-  - 效果优先：看图的每一步都用更强的 GPT-6.1 Sol，更慢也更贵
-- 这两个档位还没用实拍测过；选的模型出错或回复格式不对时，会自动换回推荐模型再试一次
-]]></description>
-            <enclosure url="https://github.com/fulisadawang/aiphoto/releases/download/v0.8.1/AIPhoto-0.8.1.zip" length="5660224" type="application/octet-stream" sparkle:edSignature="NCJvQl+lrPq8yEzHYc8Pb+FTT+CoKrZEI8sNPh5gj4zicB2U4J9iAiqdzn4oV+ruyNBTE1/Ugc+oUNCib3V8AQ=="/>
         </item>
     </channel>
 </rss>
