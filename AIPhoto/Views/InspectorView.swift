@@ -226,6 +226,10 @@ private struct EditingInspector: View {
         switch model.editTool {
         case .adjust:
             Form { EditSection(photo: photo) }.formStyle(.grouped)
+        case .portrait:
+            Form { PortraitSection(photo: photo) }
+                .formStyle(.grouped)
+                .task(id: photo.id) { model.ensureFaceShapes(photo.id) }
         case .cleanup:
             Form { CleanupSection(photo: photo) }.formStyle(.grouped)
         case .composite:

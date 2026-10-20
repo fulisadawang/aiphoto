@@ -28,6 +28,22 @@ struct FaceInfo: Codable, Hashable {
     var isBlinking: Bool
     /// 需要保持清晰的五官轮廓（眼、眉、嘴），归一化坐标（原点左上）；旧记录没有该字段
     var features: [[CGPoint]]?
+    /// 人像修复用的完整关键点；旧记录没有，打开人像工具时补测
+    var shape: FaceShape?
+}
+
+/// Vision 人脸关键点，归一化坐标（原点左上）
+struct FaceShape: Codable, Hashable {
+    /// 从一侧太阳穴经下巴到另一侧，不含额头
+    var faceContour: [CGPoint]
+    var leftEye: [CGPoint]
+    var rightEye: [CGPoint]
+    var leftPupil: CGPoint
+    var rightPupil: CGPoint
+    var leftEyebrow: [CGPoint]
+    var rightEyebrow: [CGPoint]
+    var outerLips: [CGPoint]
+    var innerLips: [CGPoint]
 }
 
 struct LocalAnalysis: Codable {

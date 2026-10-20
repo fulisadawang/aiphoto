@@ -23,7 +23,7 @@ App 显示名为「小宇专属」（2026-10-20 用户改名，`CFBundleDisplayN
 - `AIPhoto/AppModel.swift`：唯一的 `@MainActor @Observable` 状态源，负责打开/分析/分组/AI 选片/调色/去杂物/导出等全部用户动作，以及选片记录的防抖保存。
 - `AIPhoto/Core/`：不依赖界面的逻辑。
   - `PhotoScanner` 扫描配对 → `LocalAnalyzer` 本地分析（清晰度、人脸、闭眼、人体框、曝光、画面特征）→ `Culling` 分组与评分 → `AIRanker` + `VisionChatClient` AI 选片
-  - `EditSettings` 非破坏性修图参数；`AutoAdjuster` 自动白平衡/曝光；`SkinRetoucher` 皮肤柔化；`StylePreset` 风格 LUT 学习与存储
+  - `EditSettings` 非破坏性修图参数；`AutoAdjuster` 自动白平衡/曝光；`PortraitRetoucher` 本地人像修复（磨皮、黑眼圈、亮眼、牙齿、瘦脸、大眼，按 Vision 关键点定位；合影可点选单张脸）；`StylePreset` 风格 LUT 学习与存储
   - `RetouchPreset` 修图预设（`RetouchPresetStore` 存 `~/Library/Application Support/AIPhoto/presets.json`，默认预设 id 在 UserDefaults）；`LookInterpreter` 把本场诉求换算成整场统一的调色偏移；`ClipGuard` 防止套用后饱和颜色溢出
   - `Compositor` 多图合成：Vision 人物 / 主体分割点选抠图、连拍配准（整体 + 局部）、在全尺寸上合成为修补块
   - `UsageLog` 本地记录每次 AI 请求（用途、场次、response id）到 `~/Library/Application Support/AIPhoto/usage.jsonl`；`MagpieUsage` 读 Magpie 的 `/v1/magpie/usage/requests?agent=XiaoyuZhuanshu` 和 `/v1/magpie/quotas`；`UsageReport` 对账汇总（对话按 response id，出图按开始时间最接近）
@@ -31,7 +31,7 @@ App 显示名为「小宇专属」（2026-10-20 用户改名，`CFBundleDisplayN
   - `CleanupEngine` + `InpaintService` 去杂物（也用于对话改图的重画，传入指令）；`DistractionLocator` 让看图模型框出干扰物并转成画笔笔触；`PhotoRenderer` 合成修补块、套用修图、导出 JPG
   - `ViewingAids` 直方图、合焦高亮、过曝欠曝提示、拍摄参数；`AFPointReader` 解析佳能 MakerNote 的 AFInfo2 读相机对焦点
   - `XMPWriter` 星级写回；`SessionStore` 选片记录；`KeychainStore` 密钥；`ImageLoader` 读图与缓存
-- `AIPhoto/Views/`：SwiftUI 界面。侧栏分组 `GroupSidebar`、大图 `PhotoViewer`（基于 `ZoomableImage`：放大平移、修复前后对比分割线、导航图）、胶片条 `Filmstrip`、右侧 `InspectorView`（顶部切换选片 / 修图：选片模式 `CullingInspector` 只放判断用的信息；修图模式 `EditingInspector` 用竖向工具栏切换 `EditTool`：调色 `EditSection`、去杂物 `CleanupSection`、合成、对话改图 `ChatPanel`、初修记录；模式和工具存在 `AppModel.inspectorMode` / `editTool` 并记在 UserDefaults；以及 `ShootingInfoSection`、`CleanupSection`、`EditSection`、`RetouchLogSection`）、一键初修 `RetouchViews`、`SettingsView`。
+- `AIPhoto/Views/`：SwiftUI 界面。侧栏分组 `GroupSidebar`、大图 `PhotoViewer`（基于 `ZoomableImage`：放大平移、修复前后对比分割线、导航图）、胶片条 `Filmstrip`、右侧 `InspectorView`（顶部切换选片 / 修图：选片模式 `CullingInspector` 只放判断用的信息；修图模式 `EditingInspector` 用竖向工具栏切换 `EditTool`：调色 `EditSection`、人像 `PortraitSection`、去杂物 `CleanupSection`、合成、对话改图 `ChatPanel`、初修记录；模式和工具存在 `AppModel.inspectorMode` / `editTool` 并记在 UserDefaults；以及 `ShootingInfoSection`、`CleanupSection`、`EditSection`、`RetouchLogSection`）、一键初修 `RetouchViews`、`SettingsView`。
 - 需求与验收标准见 `docs/需求清单.md`，新功能先在那里确认再开发。
 
 ## 外部模型服务（用户已定，不要改动方向）
@@ -72,6 +72,7 @@ App 显示名为「小宇专属」（2026-10-20 用户改名，`CFBundleDisplayN
 - **修图预设的调色顺序**：每张先 `AutoAdjuster` 按自身光线自动调色 → 叠加预设（高光、阴影、色调、对比、饱和都是偏移量；预设不含曝光和色温）→ 叠加 `LookAdjust`（AI 对本场诉求的换算，整场只理解一次，保证颜色统一）→ `ClipGuard` 检查新增溢出超过 3% 时把本张的预设和诉求调整减到 50%/25%。描述同时写进 `Photo.retouchNote`，去杂物定位和对话改图都会带上。
 - **高光保护要看最亮通道**：`maxExposureKeepingHighlights` 原来按亮度算，饱和红墙红色通道先到顶而亮度不高，实拍红墙溢出从 0.9% 涨到 12%。现在按 RGB 最大通道算。
 - **多图合成**：结果存成 `CleanupPatch`，复用去杂物的叠加、撤销和对比。连拍对齐必须做主体周围的局部配准并按透视变换贴回：只做整体配准时被远处树枝主导，视差让近处窗框错开出现半透明双影。连拍换人要连带盖住原来的人（`coverMask` / `expandedMask`），否则姿势不同会出现重影。合成进行中 `ContentView` 的快捷键全部让出，Esc 取消。
+- **人像修复**（`PortraitRetoucher`）：关键点存在 `FaceInfo.shape`，旧记录打开人像工具或导出时用 `AppModel.withFaceShapes` 补测。先做皮肤、黑眼圈、亮眼、牙齿，最后才做瘦脸大眼的变形，否则关键点对不上。内核用 CIKL 字符串写（已弃用但 macOS 15 可用），本机没装 Metal 工具链。瘦脸不能用 Gustafsson 原式（位移远小于半径时近乎整体平移，半径处撕裂），改用 (1-(d/r)²)² 衰减，控制点取轮廓 12%～32% 处，避开嘴角。亮眼只提亮，加对比和锐化会让眼睛像描了黑边。合影单独调整按 `LocalAnalysis.faces` 下标存在 `EditSettings.faceOverrides`。
 - **AI 请求必须带 `MagpieUsage.userAgent`**：Magpie 按 User-Agent 区分调用方，用量统计靠它；新增 AI 调用时要传 `AIPurpose`，否则统计里没有这一项。
 - **右侧面板自动切换**：入口要用 `AppModel.showTool(_:)` 切到修图模式的对应工具；画笔只属于去杂物工具，离开该工具或切回选片模式会自动关闭画笔。新增修图工具时加到 `EditTool`。
 - **钥匙串会卡界面**：临时签名每次重新编译都会变，读钥匙串时 macOS 弹授权框，同步读取会把主线程卡住。现在只在设置里保存过密钥时才读（`KeychainStore.isSaved` 记在 UserDefaults），并在后台读（`loadIfSaved`）。Magpie 不需要密钥，不会触发读取。

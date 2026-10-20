@@ -141,7 +141,7 @@ private struct PresetEditor: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
-            Section("风格与皮肤") {
+            Section("风格与人像") {
                 Picker("风格", selection: binding(\.styleID)) {
                     Text("无").tag(UUID?.none)
                     ForEach(model.styles) { Text($0.name).tag(Optional($0.id)) }
@@ -149,7 +149,12 @@ private struct PresetEditor: View {
                 if preset.styleID != nil {
                     slider("风格力度", \.styleStrength, 0...1, "%.0f%%", scale: 100)
                 }
-                slider("皮肤柔化", \.skinSmoothing, 0...1, "%.0f%%", scale: 100)
+                slider("磨皮", \.skinSmoothing, 0...1, "%.0f%%", scale: 100)
+                slider("黑眼圈", \.darkCircles, 0...1, "%.0f%%", scale: 100)
+                slider("亮眼", \.eyeBrighten, 0...1, "%.0f%%", scale: 100)
+                slider("牙齿美白", \.teethWhiten, 0...1, "%.0f%%", scale: 100)
+                slider("瘦脸", \.faceSlim, 0...1, "%.0f%%", scale: 100)
+                slider("大眼", \.eyeEnlarge, 0...1, "%.0f%%", scale: 100)
             }
             Section("在自动调色基础上再调整") {
                 slider("高光", \.highlights, -1...1, "%+.2f")

@@ -22,7 +22,13 @@ final class AppModel {
     var photos: [String: Photo] = [:]
     var groups: [PhotoGroup] = []
     var selectedGroupID: Int?
-    var selectedPhotoID: String?
+    var selectedPhotoID: String? {
+        didSet { if selectedPhotoID != oldValue { portraitFace = nil } }
+    }
+    /// 人像工具里单独调整的脸（LocalAnalysis.faces 下标）；nil 表示调整全部人脸
+    var portraitFace: Int?
+    /// 正在补测人脸关键点的照片
+    var shapingPhotoIDs: Set<String> = []
     var filter: Filter = .all
     /// 放大状态全局共享，切换照片时保持倍数和位置，便于在连拍中逐张比较同一处
     var zoom = ZoomState()
@@ -542,6 +548,8 @@ final class AppModel {
                 if FileManager.default.fileExists(atPath: target.path) {
                     skipped += 1
                 } else {
+                    // 旧记录没有人像关键点时先补测，否则瘦脸、大眼等不会出现在成片里
+                    let photo = await self.withFaceShapes(photo)
                     try await Task.detached { try PhotoRenderer.exportJPEG(photo, folder: folder, to: target, quality: 0.92) }.value
                     exported += 1
                 }
@@ -552,6 +560,62 @@ final class AppModel {
             if skipped > 0 { message += "\n有 \(skipped) 个同名文件已存在，已跳过。" }
             self.alert = AlertInfo(title: "导出完成", message: message)
         }
+    }
+
+    // MARK: - 人像修复
+
+    /// 当前人像工具调整的对象：选中的那张脸，或全部人脸
+    var currentPortrait: PortraitAmounts {
+        let edit = selectedPhoto?.edit ?? .neutral
+        return portraitFace.map { edit.portrait(forFace: $0) } ?? edit.portrait
+    }
+
+    func updatePortrait(_ amounts: PortraitAmounts) {
+        var edit = selectedPhoto?.edit ?? .neutral
+        if let face = portraitFace {
+            var overrides = edit.faceOverrides ?? [:]
+            overrides[face] = amounts
+            edit.faceOverrides = overrides
+        } else {
+            edit.portrait = amounts
+        }
+        updateEdit(edit)
+    }
+
+    /// 单独调过的脸恢复成跟随全部人脸
+    func resetPortraitFace() {
+        guard let face = portraitFace, var edit = selectedPhoto?.edit else { return }
+        edit.faceOverrides?[face] = nil
+        if edit.faceOverrides?.isEmpty == true { edit.faceOverrides = nil }
+        updateEdit(edit, recordingUndo: "人像")
+    }
+
+    /// 旧版本分析的人脸没有完整关键点，打开人像工具或导出时在后台补测，写回分析记录
+    func ensureFaceShapes(_ id: String) {
+        guard let photo = photos[id], needsFaceShapes(photo), !shapingPhotoIDs.contains(id) else { return }
+        shapingPhotoIDs.insert(id)
+        Task {
+            _ = await withFaceShapes(photo)
+            shapingPhotoIDs.remove(id)
+        }
+    }
+
+    private func needsFaceShapes(_ photo: Photo) -> Bool {
+        photo.analysis?.faces.contains { $0.shape == nil } == true
+    }
+
+    func withFaceShapes(_ photo: Photo) async -> Photo {
+        guard needsFaceShapes(photo), let faces = photo.analysis?.faces else { return photo }
+        let url = photo.editURL, boxes = faces.map(\.box)
+        guard let shapes = try? await Task.detached(operation: { try LocalAnalyzer.faceShapes(url: url, boxes: boxes) }).value
+        else { return photo }
+        guard var analysis = photos[photo.id]?.analysis, analysis.faces.count == shapes.count else { return photo }
+        for index in analysis.faces.indices where analysis.faces[index].shape == nil {
+            analysis.faces[index].shape = shapes[index]
+        }
+        photos[photo.id]?.analysis = analysis
+        scheduleSave()
+        return photos[photo.id] ?? photo
     }
 
     // MARK: - 个人风格
@@ -600,7 +664,9 @@ final class AppModel {
             var edit = photo.edit ?? .neutral
             edit.styleID = source.styleID
             edit.styleStrength = source.styleStrength
-            edit.skinSmoothing = source.skinSmoothing
+            // 每张的人脸不同，单独调过的脸不同步
+            edit.portrait = source.portrait
+            edit.faceOverrides = nil
             photos[photo.id]?.edit = edit
         }
         scheduleSave()
@@ -1674,13 +1740,14 @@ enum InspectorMode: String {
 
 /// 修图模式下右侧工具栏的工具
 enum EditTool: String, CaseIterable, Identifiable {
-    case adjust, cleanup, composite, chat, log
+    case adjust, portrait, cleanup, composite, chat, log
 
     var id: String { rawValue }
 
     var title: String {
         switch self {
         case .adjust: "调色"
+        case .portrait: "人像"
         case .cleanup: "去杂物"
         case .composite: "合成"
         case .chat: "对话改图"
@@ -1691,6 +1758,7 @@ enum EditTool: String, CaseIterable, Identifiable {
     var symbol: String {
         switch self {
         case .adjust: "slider.horizontal.3"
+        case .portrait: "face.smiling"
         case .cleanup: "eraser"
         case .composite: "square.on.square.dashed"
         case .chat: "bubble.left.and.text.bubble.right"

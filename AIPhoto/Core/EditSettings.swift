@@ -19,6 +19,14 @@ struct EditSettings: Codable, Equatable {
     var vibrance = 0.0
     /// 皮肤柔化力度（0~1）
     var skinSmoothing = 0.0
+    /// 人像修复（0~1），作用于所有人脸；单独调过的脸见 faceOverrides
+    var darkCircles = 0.0
+    var eyeBrighten = 0.0
+    var teethWhiten = 0.0
+    var faceSlim = 0.0
+    var eyeEnlarge = 0.0
+    /// 合影里单独调整的脸，键为 LocalAnalysis.faces 的下标
+    var faceOverrides: [Int: PortraitAmounts]?
     /// 个人风格预设
     var styleID: UUID?
     var styleStrength = 1.0
@@ -38,13 +46,39 @@ struct EditSettings: Codable, Equatable {
         contrast = try c.decodeIfPresent(Double.self, forKey: .contrast) ?? 0
         vibrance = try c.decodeIfPresent(Double.self, forKey: .vibrance) ?? 0
         skinSmoothing = try c.decodeIfPresent(Double.self, forKey: .skinSmoothing) ?? 0
+        darkCircles = try c.decodeIfPresent(Double.self, forKey: .darkCircles) ?? 0
+        eyeBrighten = try c.decodeIfPresent(Double.self, forKey: .eyeBrighten) ?? 0
+        teethWhiten = try c.decodeIfPresent(Double.self, forKey: .teethWhiten) ?? 0
+        faceSlim = try c.decodeIfPresent(Double.self, forKey: .faceSlim) ?? 0
+        eyeEnlarge = try c.decodeIfPresent(Double.self, forKey: .eyeEnlarge) ?? 0
+        faceOverrides = try c.decodeIfPresent([Int: PortraitAmounts].self, forKey: .faceOverrides)
         styleID = try c.decodeIfPresent(UUID.self, forKey: .styleID)
         styleStrength = try c.decodeIfPresent(Double.self, forKey: .styleStrength) ?? 1
     }
 
-    /// 顺序：皮肤 → 个人风格（学自你的成片，含整体调色）→ 手动微调
+    /// 所有人脸共用的人像力度
+    var portrait: PortraitAmounts {
+        get {
+            PortraitAmounts(skin: skinSmoothing, darkCircles: darkCircles, eyeBrighten: eyeBrighten,
+                            teeth: teethWhiten, faceSlim: faceSlim, eyeEnlarge: eyeEnlarge)
+        }
+        set {
+            skinSmoothing = newValue.skin
+            darkCircles = newValue.darkCircles
+            eyeBrighten = newValue.eyeBrighten
+            teethWhiten = newValue.teeth
+            faceSlim = newValue.faceSlim
+            eyeEnlarge = newValue.eyeEnlarge
+        }
+    }
+
+    func portrait(forFace index: Int) -> PortraitAmounts {
+        faceOverrides?[index] ?? portrait
+    }
+
+    /// 顺序：人像修复 → 个人风格（学自你的成片，含整体调色）→ 手动微调
     func apply(to image: CIImage, faces: [FaceInfo]) -> CIImage {
-        var output = SkinRetoucher.apply(to: image, faces: faces, amount: skinSmoothing)
+        var output = PortraitRetoucher.apply(to: image, faces: faces, amounts: portrait(forFace:))
         if let styleID, let preset = StyleStore.shared.preset(styleID) {
             output = preset.apply(to: output, strength: styleStrength)
         }

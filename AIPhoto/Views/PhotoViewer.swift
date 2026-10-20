@@ -45,6 +45,9 @@ struct PhotoViewer: View {
                             }
                         } else if model.brushMode {
                             BrushOverlay()
+                        } else if model.inspectorMode == .editing, model.editTool == .portrait,
+                                  let faces = photo.analysis?.faces, faces.count > 1 {
+                            PortraitFaceOverlay(faces: faces)
                         }
                     }
                 }
@@ -208,6 +211,34 @@ struct FaceOverlay: View {
         .allowsHitTesting(false)
     }
 
+}
+
+/// 合影时在人像工具里点选单独调整的脸，再点一次回到全部人脸
+struct PortraitFaceOverlay: View {
+    @Environment(AppModel.self) private var model
+    let faces: [FaceInfo]
+
+    var body: some View {
+        GeometryReader { geometry in
+            ForEach(Array(faces.enumerated()), id: \.offset) { index, face in
+                let selected = model.portraitFace == index
+                let custom = model.selectedPhoto?.edit?.faceOverrides?[index] != nil
+                RoundedRectangle(cornerRadius: 4)
+                    .stroke(selected ? Color.accentColor : Color.white.opacity(0.8),
+                            style: StrokeStyle(lineWidth: selected ? 3 : 1.5, dash: selected ? [] : [6, 4]))
+                    .overlay(alignment: .topLeading) {
+                        Text(custom ? "\(index + 1) 单独" : "\(index + 1)")
+                            .badgeStyle(selected ? .accentColor : .black)
+                            .offset(y: -22)
+                    }
+                    .contentShape(Rectangle())
+                    .frame(width: face.box.width * geometry.size.width, height: face.box.height * geometry.size.height)
+                    .position(x: face.box.midX * geometry.size.width, y: face.box.midY * geometry.size.height)
+                    .onTapGesture { model.portraitFace = selected ? nil : index }
+                    .help(selected ? "再点一次回到调整全部人脸" : "只调整这张脸")
+            }
+        }
+    }
 }
 
 struct DecisionBadge: View {

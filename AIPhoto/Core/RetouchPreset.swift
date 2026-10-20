@@ -17,6 +17,12 @@ struct RetouchPreset: Codable, Identifiable, Equatable {
     var vibrance = 0.0
     /// 给 AI 的描述：调色、去杂物、对话改图都会参考
     var note = ""
+    /// 人像修复（0~1），套用时作用于所有人脸
+    var darkCircles = 0.0
+    var eyeBrighten = 0.0
+    var teethWhiten = 0.0
+    var faceSlim = 0.0
+    var eyeEnlarge = 0.0
 
     /// 在自动调色结果上叠加预设
     func applied(to auto: EditSettings) -> EditSettings {
@@ -24,6 +30,12 @@ struct RetouchPreset: Codable, Identifiable, Equatable {
         edit.styleID = styleID
         edit.styleStrength = styleStrength
         edit.skinSmoothing = skinSmoothing
+        edit.darkCircles = darkCircles
+        edit.eyeBrighten = eyeBrighten
+        edit.teethWhiten = teethWhiten
+        edit.faceSlim = faceSlim
+        edit.eyeEnlarge = eyeEnlarge
+        edit.faceOverrides = nil
         edit.highlights = Self.clamp(auto.highlights + highlights, "highlights")
         edit.shadows = Self.clamp(auto.shadows + shadows, "shadows")
         edit.tint = Self.clamp(auto.tint + tint, "tint")
@@ -37,13 +49,38 @@ struct RetouchPreset: Codable, Identifiable, Equatable {
         RetouchPreset(
             name: name, styleID: edit.styleID, styleStrength: edit.styleStrength, skinSmoothing: edit.skinSmoothing,
             highlights: edit.highlights - auto.highlights, shadows: edit.shadows - auto.shadows, tint: edit.tint - auto.tint,
-            contrast: edit.contrast - auto.contrast, vibrance: edit.vibrance - auto.vibrance, note: note
+            contrast: edit.contrast - auto.contrast, vibrance: edit.vibrance - auto.vibrance, note: note,
+            darkCircles: edit.darkCircles, eyeBrighten: edit.eyeBrighten, teethWhiten: edit.teethWhiten,
+            faceSlim: edit.faceSlim, eyeEnlarge: edit.eyeEnlarge
         )
     }
 
     static func clamp(_ value: Double, _ key: String) -> Double {
         guard let range = ChatEditor.ranges[key] else { return value }
         return min(range.upperBound, max(range.lowerBound, value))
+    }
+}
+
+extension RetouchPreset {
+    /// 新增字段用 decodeIfPresent，兼容旧版本保存的预设
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decode(UUID.self, forKey: .id)
+        name = try c.decode(String.self, forKey: .name)
+        styleID = try c.decodeIfPresent(UUID.self, forKey: .styleID)
+        styleStrength = try c.decodeIfPresent(Double.self, forKey: .styleStrength) ?? 1
+        skinSmoothing = try c.decodeIfPresent(Double.self, forKey: .skinSmoothing) ?? 0.25
+        highlights = try c.decodeIfPresent(Double.self, forKey: .highlights) ?? 0
+        shadows = try c.decodeIfPresent(Double.self, forKey: .shadows) ?? 0
+        tint = try c.decodeIfPresent(Double.self, forKey: .tint) ?? 0
+        contrast = try c.decodeIfPresent(Double.self, forKey: .contrast) ?? 0
+        vibrance = try c.decodeIfPresent(Double.self, forKey: .vibrance) ?? 0
+        note = try c.decodeIfPresent(String.self, forKey: .note) ?? ""
+        darkCircles = try c.decodeIfPresent(Double.self, forKey: .darkCircles) ?? 0
+        eyeBrighten = try c.decodeIfPresent(Double.self, forKey: .eyeBrighten) ?? 0
+        teethWhiten = try c.decodeIfPresent(Double.self, forKey: .teethWhiten) ?? 0
+        faceSlim = try c.decodeIfPresent(Double.self, forKey: .faceSlim) ?? 0
+        eyeEnlarge = try c.decodeIfPresent(Double.self, forKey: .eyeEnlarge) ?? 0
     }
 }
 

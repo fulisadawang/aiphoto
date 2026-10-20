@@ -40,12 +40,6 @@ struct EditSection: View {
             if edit.styleID != nil {
                 slider("风格力度", value: edit.styleStrength, range: 0...1, format: "%.0f%%", scale: 100) { $0.styleStrength = $1 }
             }
-            slider("皮肤柔化", value: edit.skinSmoothing, range: 0...1, format: "%.0f%%", scale: 100) { $0.skinSmoothing = $1 }
-            if edit.skinSmoothing > 0, photo.analysis?.faces.contains(where: { $0.features != nil }) != true {
-                Text("这张照片没有可用的五官定位（未检测到人脸，或是旧版本的分析记录），皮肤柔化不会生效。")
-                    .font(.caption)
-                    .foregroundStyle(.orange)
-            }
             slider("曝光", value: edit.exposure, range: -2...2, format: "%+.2f EV") { $0.exposure = $1 }
             slider("色温", value: edit.temperature, range: 2500...11000, format: "%.0f K") { $0.temperature = $1 }
             slider("色调", value: edit.tint, range: -60...60, format: "%+.0f") { $0.tint = $1 }
@@ -57,8 +51,8 @@ struct EditSection: View {
             HStack {
                 Button("同步到本组") { model.syncEditToGroup() }
                     .help("当前全部参数套用到本组未淘汰的照片")
-                Button("风格和皮肤套用到全部已选") { model.applyStyleToAllPicked() }
-                    .help("只同步风格、力度和皮肤柔化，各张的曝光等微调保留")
+                Button("风格和人像套用到全部已选") { model.applyStyleToAllPicked() }
+                    .help("只同步风格、力度和人像修复，各张的曝光等微调保留")
             }
             .disabled(photo.edit == nil)
         }

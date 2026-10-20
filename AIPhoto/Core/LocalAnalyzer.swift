@@ -46,7 +46,8 @@ enum LocalAnalyzer {
                 quality: quality,
                 eyeOpenness: openness,
                 isBlinking: openness.map { $0 < blinkRatio } ?? false,
-                features: featurePolygons(of: observation, imageSize: imageSize)
+                features: featurePolygons(of: observation, imageSize: imageSize),
+                shape: faceShape(of: observation, imageSize: imageSize)
             )
         }
 
@@ -101,6 +102,47 @@ enum LocalAnalyzer {
             return points.map { CGPoint(x: $0.x / imageSize.width, y: 1 - $0.y / imageSize.height) }
         }
         return polygons.isEmpty ? nil : polygons
+    }
+
+    static func faceShape(of face: VNFaceObservation, imageSize: CGSize) -> FaceShape? {
+        guard let l = face.landmarks else { return nil }
+        func points(_ region: VNFaceLandmarkRegion2D?) -> [CGPoint]? {
+            guard let points = region?.pointsInImage(imageSize: imageSize), !points.isEmpty else { return nil }
+            return points.map { CGPoint(x: $0.x / imageSize.width, y: 1 - $0.y / imageSize.height) }
+        }
+        guard let contour = points(l.faceContour), let leftEye = points(l.leftEye), let rightEye = points(l.rightEye),
+              let leftPupil = points(l.leftPupil)?.first, let rightPupil = points(l.rightPupil)?.first,
+              let leftBrow = points(l.leftEyebrow), let rightBrow = points(l.rightEyebrow),
+              let outer = points(l.outerLips), let inner = points(l.innerLips)
+        else { return nil }
+        return FaceShape(
+            faceContour: contour, leftEye: leftEye, rightEye: rightEye, leftPupil: leftPupil, rightPupil: rightPupil,
+            leftEyebrow: leftBrow, rightEyebrow: rightBrow, outerLips: outer, innerLips: inner
+        )
+    }
+
+    /// 旧记录补测关键点：重新检测后按人脸框重叠度对应到已有的人脸，对不上的留空
+    static func faceShapes(url: URL, boxes: [CGRect]) throws -> [FaceShape?] {
+        guard let image = ImageLoader.image(at: url, maxPixel: 1600) else { throw AnalyzerError.unreadable(url) }
+        let request = VNDetectFaceLandmarksRequest()
+        try VNImageRequestHandler(cgImage: image, options: [:]).perform([request])
+        let imageSize = CGSize(width: image.width, height: image.height)
+        let detected = (request.results ?? []).map { observation in
+            let b = observation.boundingBox
+            return (box: CGRect(x: b.minX, y: 1 - b.maxY, width: b.width, height: b.height), observation: observation)
+        }
+        return boxes.map { box in
+            let best = detected.max { overlap($0.box, box) < overlap($1.box, box) }
+            guard let best, overlap(best.box, box) > 0.5 else { return nil }
+            return faceShape(of: best.observation, imageSize: imageSize)
+        }
+    }
+
+    private static func overlap(_ a: CGRect, _ b: CGRect) -> CGFloat {
+        let inter = a.intersection(b)
+        guard !inter.isNull else { return 0 }
+        let i = inter.width * inter.height
+        return i / (a.width * a.height + b.width * b.height - i)
     }
 
     /// 返回两只眼中较大的"深色区域高度 / 眼宽"，任意一只眼睁开就不算闭眼
