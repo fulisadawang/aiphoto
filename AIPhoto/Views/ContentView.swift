@@ -6,7 +6,7 @@ struct ContentView: View {
     @FocusState private var viewerFocused: Bool
 
     /// 对话改图的输入框有焦点时，按键交给文本框，不触发选片快捷键（文本框编辑时第一响应者是字段编辑器 NSTextView）
-    private var isEditingText: Bool { NSApp.keyWindow?.firstResponder is NSTextView }
+    private var isEditingText: Bool { NSApp.keyWindow?.firstResponder is NSTextView || model.isCompositing }
 
     var body: some View {
         @Bindable var model = model
@@ -24,7 +24,8 @@ struct ContentView: View {
                     GridView()
                         .onTapGesture { viewerFocused = true }
                 } else if let photo = model.selectedPhoto {
-                    PhotoViewer(photo: photo)
+                    // 合成选取阶段大图显示来源照片
+                    PhotoViewer(photo: model.compositeShownPhoto ?? photo)
                         .onTapGesture { viewerFocused = true }
                     Divider()
                     Filmstrip(photos: model.selectedPhotos)
@@ -63,6 +64,10 @@ struct ContentView: View {
             return .handled
         }
         .onKeyPress(.escape) {
+            if model.isCompositing {
+                model.cancelComposite()
+                return .handled
+            }
             guard model.brushMode, !isEditingText else { return .ignored }
             if model.strokes.isEmpty { model.toggleBrush() } else { model.strokes = [] }
             return .handled
@@ -130,6 +135,7 @@ struct ContentView: View {
         .sheet(isPresented: $model.showRetouchStart) { RetouchStartSheet().environment(model) }
         .sheet(isPresented: $model.showPresetManager) { PresetManagerSheet().environment(model) }
         .sheet(isPresented: $model.showSavePreset) { SavePresetSheet().environment(model) }
+        .sheet(isPresented: $model.showCompositePicker) { CompositeSourcePicker().environment(model) }
         .sheet(isPresented: $model.showRetouchSummary) { RetouchSummaryView().environment(model) }
         .alert(item: $model.alert) { info in
             Alert(title: Text(info.title), message: Text(info.message))

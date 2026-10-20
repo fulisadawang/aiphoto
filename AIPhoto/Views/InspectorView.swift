@@ -4,7 +4,9 @@ struct InspectorView: View {
     @Environment(AppModel.self) private var model
 
     var body: some View {
-        if let photo = model.selectedPhoto, model.chatPanelOpen {
+        if let session = model.composite {
+            CompositePanel(session: session)
+        } else if let photo = model.selectedPhoto, model.chatPanelOpen {
             ChatPanel(photo: photo)
         } else if let photo = model.selectedPhoto {
             Form {
@@ -35,6 +37,8 @@ struct InspectorView: View {
                 ShootingInfoSection(photo: photo)
 
                 CleanupSection(photo: photo)
+
+                CompositeEntrySection()
 
                 EditSection(photo: photo)
 

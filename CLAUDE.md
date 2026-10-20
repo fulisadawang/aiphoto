@@ -25,6 +25,7 @@ App 显示名为「小宇专属」（2026-10-20 用户改名，`CFBundleDisplayN
   - `PhotoScanner` 扫描配对 → `LocalAnalyzer` 本地分析（清晰度、人脸、闭眼、人体框、曝光、画面特征）→ `Culling` 分组与评分 → `AIRanker` + `VisionChatClient` AI 选片
   - `EditSettings` 非破坏性修图参数；`AutoAdjuster` 自动白平衡/曝光；`SkinRetoucher` 皮肤柔化；`StylePreset` 风格 LUT 学习与存储
   - `RetouchPreset` 修图预设（`RetouchPresetStore` 存 `~/Library/Application Support/AIPhoto/presets.json`，默认预设 id 在 UserDefaults）；`LookInterpreter` 把本场诉求换算成整场统一的调色偏移；`ClipGuard` 防止套用后饱和颜色溢出
+  - `Compositor` 多图合成：Vision 人物 / 主体分割点选抠图、连拍配准（整体 + 局部）、在全尺寸上合成为修补块
   - `ChatEditor` 对话改图：把一句话换算成调色参数、要去掉的物体和要重画的区域，并校正位置；
   - `CleanupEngine` + `InpaintService` 去杂物（也用于对话改图的重画，传入指令）；`DistractionLocator` 让看图模型框出干扰物并转成画笔笔触；`PhotoRenderer` 合成修补块、套用修图、导出 JPG
   - `ViewingAids` 直方图、合焦高亮、过曝欠曝提示、拍摄参数；`AFPointReader` 解析佳能 MakerNote 的 AFInfo2 读相机对焦点
@@ -69,6 +70,7 @@ App 显示名为「小宇专属」（2026-10-20 用户改名，`CFBundleDisplayN
 - 过曝提示要看"三个通道都到顶"（死白），不能用"任一通道到顶"：饱和的红色衣服、红房子会整片误报。
 - **修图预设的调色顺序**：每张先 `AutoAdjuster` 按自身光线自动调色 → 叠加预设（高光、阴影、色调、对比、饱和都是偏移量；预设不含曝光和色温）→ 叠加 `LookAdjust`（AI 对本场诉求的换算，整场只理解一次，保证颜色统一）→ `ClipGuard` 检查新增溢出超过 3% 时把本张的预设和诉求调整减到 50%/25%。描述同时写进 `Photo.retouchNote`，去杂物定位和对话改图都会带上。
 - **高光保护要看最亮通道**：`maxExposureKeepingHighlights` 原来按亮度算，饱和红墙红色通道先到顶而亮度不高，实拍红墙溢出从 0.9% 涨到 12%。现在按 RGB 最大通道算。
+- **多图合成**：结果存成 `CleanupPatch`，复用去杂物的叠加、撤销和对比。连拍对齐必须做主体周围的局部配准并按透视变换贴回：只做整体配准时被远处树枝主导，视差让近处窗框错开出现半透明双影。连拍换人要连带盖住原来的人（`coverMask` / `expandedMask`），否则姿势不同会出现重影。合成进行中 `ContentView` 的快捷键全部让出，Esc 取消。
 - **钥匙串会卡界面**：临时签名每次重新编译都会变，读钥匙串时 macOS 弹授权框，同步读取会把主线程卡住。现在只在设置里保存过密钥时才读（`KeychainStore.isSaved` 记在 UserDefaults），并在后台读（`loadIfSaved`）。Magpie 不需要密钥，不会触发读取。
 - **对话改图的位置不能直接信模型**：人像修饰对齐本地人脸框，其他物体放大局部再确认（`ChatEditor.resolve`）。重画放大回原尺寸超过 3 倍不执行（`maxRedrawUpscale`），大面积改色走整体调色。
 - 主窗口的快捷键挂在 `ContentView` 上，文本框有焦点时必须让出（`isEditingText`），否则在对话框里打字会触发淘汰、缩放等。

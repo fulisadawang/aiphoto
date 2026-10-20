@@ -25,7 +25,7 @@ struct PhotoViewer: View {
                     image: image,
                     compareImage: model.compareMode ? (originalImage ?? image) : nil,
                     pixelSize: pixelSize,
-                    allowsDragPan: !model.brushMode
+                    allowsDragPan: !model.brushMode && !model.isCompositing
                 ) {
                     ZStack {
                         if model.showPeaking, let peakingMask {
@@ -37,7 +37,15 @@ struct PhotoViewer: View {
                         if model.showFaces {
                             FaceOverlay(faces: photo.analysis?.faces ?? [], afAreas: afAreas)
                         }
-                        if model.brushMode { BrushOverlay() }
+                        if let session = model.composite {
+                            if session.stage == .selecting, photo.id == session.sourceID {
+                                CompositeSelectOverlay(session: session)
+                            } else if session.stage == .placing, photo.id == session.targetID {
+                                CompositePlaceOverlay(session: session)
+                            }
+                        } else if model.brushMode {
+                            BrushOverlay()
+                        }
                     }
                 }
             } else {
@@ -154,7 +162,9 @@ struct PhotoViewer: View {
             if model.compareMode, !isEdited {
                 Text("这张还没有修复，左右相同").badgeStyle(.gray)
             }
-            if model.brushMode {
+            if let session = model.composite {
+                Text(session.stage == .selecting ? "合成：这是来源照片，点选要拿的东西" : "合成：调整位置后点「完成合成」").badgeStyle(.indigo)
+            } else if model.brushMode {
                 Text("画笔：涂抹要去掉的物体，回车消除，Esc 清除").badgeStyle(.pink)
             }
             if let renderError {
@@ -258,7 +268,11 @@ struct BrushOverlay: View {
                             model.beginStroke(at: point)
                         }
                     }
-                    .onEnded { _ in drawing = false }
+                    .onEnded { _ in
+                        drawing = false
+                        // 合成时的画笔修正一笔就生效
+                        if model.composite?.refineAdd != nil { model.applyCompositeStroke() }
+                    }
             )
         }
     }

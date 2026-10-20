@@ -93,6 +93,9 @@ final class AppModel {
     var locatingPhotoIDs: Set<String> = []
     /// 对话改图面板是否打开
     var chatPanelOpen = false
+    /// 多图合成进行中；nil 表示没有在合成
+    var composite: CompositeSession?
+    var showCompositePicker = false
     /// 正在等模型理解指令的照片
     var chattingPhotoIDs: Set<String> = []
     /// 一键初修进度：已处理 / 总数；nil 表示没有在初修
@@ -759,7 +762,7 @@ final class AppModel {
     }
 
     /// 同一张照片的任务按顺序做（后一次要叠在前一次的结果上），不同照片可以并行
-    private func pumpCleanupQueue() {
+    func pumpCleanupQueue() {
         guard let folder = folderURL else { return }
         while cleanupJobs.filter(\.isRunning).count < Self.cleanupConcurrency,
               let index = cleanupJobs.firstIndex(where: { job in
@@ -1354,5 +1357,261 @@ extension AppModel.CleanupJob {
     var undoLabel: String {
         guard let itemName else { return "去杂物" }
         return prompt == nil ? "去掉\(itemName)" : "重画\(itemName)"
+    }
+}
+
+// MARK: - 多图合成
+
+/// 合成进行中的状态，不保存：关掉 App 或换文件夹就丢弃
+struct CompositeSession {
+    enum Stage { case selecting, placing }
+
+    let targetID: String
+    let sourceID: String
+    var stage: Stage = .selecting
+    /// 来源照片的分割结果和用于分割的预览图（长边 2048）
+    var segmentation: Compositor.Segmentation?
+    /// 选中的蒙版，与分割预览同尺寸
+    var mask: CGImage?
+    var isPerson = false
+    /// 蒙版染色后叠在来源照片上的提示层
+    var maskOverlay: CGImage?
+    /// 画笔修正：true 补选，false 擦除，nil 未在修正
+    var refineAdd: Bool?
+    /// 选中部分的包围框（来源归一化坐标）和带透明度的小图，拖放时显示
+    var sourceBox: CGRect?
+    var subjectPreview: CGImage?
+    var placement: Compositor.Placement?
+    /// 连拍自动对齐的初始放置，「重新对齐」时恢复
+    var alignedPlacement: Compositor.Placement?
+    var blendWithAI = false
+    var status: String?
+}
+
+extension AppModel {
+    /// 当前照片可选的来源：同一组连拍排在前面，其余按拍摄时间
+    var compositeSourceCandidates: [Photo] {
+        guard let target = selectedPhoto else { return [] }
+        let groupIDs = Set(selectedGroup?.photoIDs ?? [])
+        return photos.values
+            .filter { $0.id != target.id }
+            .sorted { a, b in
+                let ga = groupIDs.contains(a.id), gb = groupIDs.contains(b.id)
+                if ga != gb { return ga }
+                return (a.captureDate ?? .distantPast, a.id) < (b.captureDate ?? .distantPast, b.id)
+            }
+    }
+
+    var isCompositing: Bool { composite != nil }
+
+    /// 合成进行中大图显示哪张：选取阶段显示来源，放置阶段显示当前照片
+    var compositeShownPhoto: Photo? {
+        guard let composite else { return nil }
+        return photos[composite.stage == .selecting ? composite.sourceID : composite.targetID]
+    }
+
+    func beginComposite(sourceID: String) {
+        guard let target = selectedPhotoID, let source = photos[sourceID] else { return }
+        brushMode = false
+        strokes = []
+        zoom.pixelRatio = nil
+        composite = CompositeSession(targetID: target, sourceID: sourceID, status: "正在识别来源照片里的主体…")
+        let url = source.editURL
+        Task {
+            do {
+                let segmentation = try await Task.detached {
+                    guard let image = ImageLoader.image(at: url, maxPixel: 2048) else { throw Compositor.CompositeError.unreadable }
+                    return try Compositor.segment(image)
+                }.value
+                guard composite?.sourceID == sourceID else { return }
+                composite?.segmentation = segmentation
+                composite?.status = "点一下要拿过来的人或东西"
+            } catch {
+                composite?.status = "识别失败：\(error.localizedDescription)"
+            }
+        }
+    }
+
+    /// 在来源照片上点一下选中主体
+    func compositeTap(at point: CGPoint) {
+        guard let segmentation = composite?.segmentation else { return }
+        do {
+            let selection = try Compositor.select(at: point, in: segmentation)
+            composite?.isPerson = selection.isPerson
+            setCompositeMask(selection.mask)
+            composite?.status = selection.isPerson ? "已选中这个人。不准的地方可以用画笔补选或擦除" : "已选中。不准的地方可以用画笔补选或擦除"
+        } catch {
+            composite?.status = error.localizedDescription
+        }
+    }
+
+    /// 画笔修正：切换补选 / 擦除，再点一次同一个退出
+    func toggleCompositeRefine(add: Bool) {
+        guard composite != nil else { return }
+        composite?.refineAdd = composite?.refineAdd == add ? nil : add
+        brushMode = composite?.refineAdd != nil
+        strokes = []
+    }
+
+    /// 一笔画完立即作用到蒙版上；没有选中时补选就是从空白开始画
+    func applyCompositeStroke() {
+        guard let session = composite, let add = session.refineAdd, !strokes.isEmpty,
+              let size = session.segmentation.map({ CGSize(width: $0.image.width, height: $0.image.height) })
+        else { return }
+        let base = session.mask ?? Self.emptyMask(size)
+        if let refined = base.flatMap({ Compositor.refine($0, strokes: strokes, add: add) }) {
+            setCompositeMask(refined)
+        }
+        strokes = []
+    }
+
+    private static func emptyMask(_ size: CGSize) -> CGImage? {
+        let context = CGContext(
+            data: nil, width: Int(size.width), height: Int(size.height), bitsPerComponent: 8, bytesPerRow: Int(size.width),
+            space: CGColorSpaceCreateDeviceGray(), bitmapInfo: CGImageAlphaInfo.none.rawValue
+        )
+        return context?.makeImage()
+    }
+
+    private func setCompositeMask(_ mask: CGImage) {
+        composite?.mask = mask
+        let overlay = CIImage(color: CIColor(red: 0.2, green: 0.55, blue: 1, alpha: 0.45))
+            .cropped(to: CGRect(x: 0, y: 0, width: mask.width, height: mask.height))
+            .applyingFilter("CIBlendWithMask", parameters: [kCIInputBackgroundImageKey: CIImage.empty(), kCIInputMaskImageKey: CIImage(cgImage: mask)])
+        composite?.maskOverlay = PhotoRenderer.context.createCGImage(overlay, from: overlay.extent, format: .RGBA8, colorSpace: PhotoRenderer.sRGB)
+    }
+
+    /// 选好了：算出初始放置。同一组连拍或前后一分钟内的照片先尝试自动对齐，失败就放在画面中央
+    func confirmCompositeSelection() {
+        guard var session = composite, let mask = session.mask, let segmentation = session.segmentation,
+              let box = Compositor.boundingBox(of: mask), let target = photos[session.targetID], let source = photos[session.sourceID]
+        else {
+            composite?.status = "还没有选中任何东西"
+            return
+        }
+        let isBurst = selectedGroup?.photoIDs.contains(source.id) == true
+            || abs((source.captureDate ?? .distantPast).timeIntervalSince(target.captureDate ?? .distantFuture)) < 60
+        brushMode = false
+        strokes = []
+        session.refineAdd = nil
+        session.status = isBurst ? "正在和当前照片对齐…" : nil
+        composite = session
+        let targetURL = target.editURL, sourceSize = CGSize(width: segmentation.image.width, height: segmentation.image.height)
+        let sourceImage = segmentation.image, isPerson = session.isPerson
+        Task {
+            let result = await Task.detached { () -> (CGImage, CGRect, Compositor.Placement?) in
+                var mask = mask, box = box
+                var placement: Compositor.Placement?
+                if isBurst, let targetImage = ImageLoader.image(at: targetURL, maxPixel: 2048),
+                   let map = Compositor.alignment(source: sourceImage, target: targetImage, focus: box) {
+                    // 连拍换人：把当前照片里对应的人也盖住；认不出时把来源主体外扩一圈
+                    let center = CGPoint(x: box.midX, y: box.midY), mapped = map(center)
+                    let offset = CGPoint(x: mapped.x - center.x, y: mapped.y - center.y)
+                    let covered = (try? Compositor.select(at: mapped, in: Compositor.segment(targetImage), peopleOnly: isPerson))
+                        .flatMap { Compositor.coverMask(sourceMask: mask, targetMask: $0.mask, offset: offset) }
+                    if let merged = covered ?? Compositor.expandedMask(mask), let mergedBox = Compositor.boundingBox(of: merged) {
+                        mask = merged
+                        box = mergedBox
+                    }
+                    let corners = [CGPoint(x: box.minX, y: box.minY), CGPoint(x: box.maxX, y: box.maxY)].map(map)
+                    placement = Compositor.Placement(
+                        rect: CGRect(x: corners[0].x, y: corners[0].y, width: corners[1].x - corners[0].x, height: corners[1].y - corners[0].y),
+                        warp: map
+                    )
+                }
+                return (mask, box, placement)
+            }.value
+            guard composite?.sourceID == source.id else { return }
+            let (finalMask, finalBox, aligned) = result
+            composite?.mask = finalMask
+            composite?.sourceBox = finalBox
+            composite?.subjectPreview = Self.subjectPreview(sourceImage, mask: finalMask, box: finalBox)
+            let targetSize = ImageLoader.orientedPixelSize(at: targetURL) ?? sourceSize
+            let placement = aligned ?? Compositor.Placement(rect: Compositor.defaultRect(
+                sourceBox: finalBox, sourceSize: ImageLoader.orientedPixelSize(at: source.editURL) ?? sourceSize,
+                targetSize: targetSize, center: CGPoint(x: 0.5, y: 0.6)
+            ))
+            composite?.placement = placement
+            composite?.alignedPlacement = aligned
+            composite?.stage = .placing
+            composite?.status = aligned != nil
+                ? "已和连拍自动对齐。确认没问题就点「完成合成」，也可以拖动微调"
+                : (isBurst ? "没能自动对齐，请拖动到合适位置；拖右下角调大小" : "拖动到合适位置；拖右下角调大小")
+        }
+    }
+
+    private static func subjectPreview(_ image: CGImage, mask: CGImage, box: CGRect) -> CGImage? {
+        let size = CGSize(width: image.width, height: image.height)
+        let crop = CGRect(x: box.minX * size.width, y: (1 - box.maxY) * size.height, width: box.width * size.width, height: box.height * size.height)
+        let cut = CIImage(cgImage: image).applyingFilter("CIBlendWithMask", parameters: [
+            kCIInputBackgroundImageKey: CIImage.empty(), kCIInputMaskImageKey: CIImage(cgImage: mask),
+        ]).cropped(to: crop)
+        return PhotoRenderer.context.createCGImage(cut, from: crop, format: .RGBA8, colorSpace: PhotoRenderer.sRGB)
+    }
+
+    /// 拖动或缩放：手动调整后不再按连拍对齐的透视变换贴
+    func moveCompositePlacement(to rect: CGRect) {
+        composite?.placement?.rect = rect
+        composite?.placement?.warp = nil
+    }
+
+    func flipCompositePlacement() {
+        composite?.placement?.flipped.toggle()
+        composite?.placement?.warp = nil
+    }
+
+    func realignComposite() {
+        guard let aligned = composite?.alignedPlacement else { return }
+        composite?.placement = aligned
+    }
+
+    func cancelComposite() {
+        if let target = composite?.targetID, let group = groups.first(where: { $0.photoIDs.contains(target) }) {
+            selectGroup(group.id, photoID: target)
+        }
+        composite = nil
+        brushMode = false
+        strokes = []
+    }
+
+    /// 在全尺寸上合成并作为一块修补贴到当前照片；勾选了 AI 融合就再排一个重画任务
+    func finishComposite() {
+        guard let session = composite, let placement = session.placement, let mask = session.mask, let box = session.sourceBox,
+              let target = photos[session.targetID], let source = photos[session.sourceID], let folder = folderURL
+        else { return }
+        composite?.status = "正在合成…"
+        let blend = session.blendWithAI
+        Task {
+            do {
+                let patch = try await Task.detached {
+                    guard let sourceFull = PhotoRenderer.fullResolution(of: source),
+                          let targetFull = PhotoRenderer.fullResolution(of: target)
+                    else { throw Compositor.CompositeError.unreadable }
+                    // 两边都先叠上各自的去杂物结果，拿过来的东西和底图都是干净的
+                    let sourceBase = try PhotoRenderer.composite(sourceFull, patches: source.cleanups ?? [], folder: folder)
+                    let targetBase = try PhotoRenderer.composite(targetFull, patches: target.cleanups ?? [], folder: folder)
+                    return try Compositor.bake(source: sourceBase, mask: mask, sourceBox: box, target: targetBase, placement: placement, folder: folder)
+                }.value
+                guard folderURL == folder, photos[target.id] != nil else { return }
+                let patches = (photos[target.id]?.cleanups ?? []) + [patch]
+                recordUndo(.cleanups, ids: [target.id], label: "合成：从 \(source.fileName) 取")
+                photos[target.id]?.cleanups = patches
+                if blend, let size = ImageLoader.orientedPixelSize(at: target.editURL) {
+                    let r = patch.rect
+                    cleanupJobs.append(CleanupJob(
+                        photoID: target.id,
+                        strokes: DistractionLocator.strokes(covering: r, imageAspect: size.width / size.height),
+                        itemName: "合成主体（融合边缘和影子）",
+                        isLarge: false,
+                        prompt: Compositor.blendPrompt
+                    ))
+                    pumpCleanupQueue()
+                }
+                scheduleSave()
+                cancelComposite()
+            } catch {
+                composite?.status = "合成失败：\(error.localizedDescription)"
+            }
+        }
     }
 }
