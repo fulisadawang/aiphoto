@@ -3,6 +3,30 @@
     <channel>
         <title>AIPhoto</title>
         <item>
+            <title>0.3.0</title>
+            <pubDate>Tue, 20 Oct 2026 11:24:29 +0800</pubDate>
+            <sparkle:version>4</sparkle:version>
+            <sparkle:shortVersionString>0.3.0</sparkle:shortVersionString>
+            <sparkle:minimumSystemVersion>15.0</sparkle:minimumSystemVersion>
+            <sparkle:hardwareRequirements>arm64</sparkle:hardwareRequirements>
+            <description sparkle:format="markdown"><![CDATA[## v0.3.0
+
+### 自定义修图预设
+- 把常用的修法存成预设：风格、磨皮、对比度、饱和度、高光阴影，以及一段给 AI 的描述
+- 修图面板「套用预设」到当前照片或全部已选；「存为预设」把修好的照片存下来
+- 可设默认预设，一键初修时自动选中
+
+### 本场诉求
+- 一键初修前可以写一句本场要求（如"整体通透偏暖，地上的落叶保留"）
+- AI 把要求换算成整场统一的调色，去杂物和对话改图也会按要求保留或去除
+
+### 改进
+- 自动调色不再把红墙、红衣服提亮到溢出
+- 套用预设后颜色溢出过多时自动减弱，保留纹理
+]]></description>
+            <enclosure url="https://github.com/fulisadawang/aiphoto/releases/download/v0.3.0/AIPhoto-0.3.0.zip" length="5186983" type="application/octet-stream" sparkle:edSignature="X99GX/5KBPukrRjeDuN7xxzMSqOuisONMY6e/W7B+SQP765dAQ82h+i+SssSadMuSoqgUVx0sE/NzLII7tt0Bw=="/>
+        </item>
+        <item>
             <title>0.2.1</title>
             <pubDate>Mon, 19 Oct 2026 21:07:53 +0800</pubDate>
             <sparkle:version>3</sparkle:version>
