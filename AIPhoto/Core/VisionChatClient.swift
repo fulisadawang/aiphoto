@@ -5,6 +5,8 @@ struct VisionChatClient {
     var baseURL: URL
     var apiKey: String
     var model: String
+    /// 用量统计里记到哪一项
+    var purpose: AIPurpose
 
     enum ClientError: LocalizedError {
         case http(Int, String)
@@ -24,10 +26,16 @@ struct VisionChatClient {
 
     /// content 为 OpenAI 格式的消息分段（text / image_url），返回模型输出的 JSON 数据
     func json(system: String, content: [[String: Any]]) async throws -> Data {
+        let start = Date()
+        var responseID: String?
+        var ok = false
+        defer { UsageLog.shared.record(purpose: purpose, start: start, responseID: responseID, requestedModel: model, ok: ok) }
         var request = URLRequest(url: baseURL.appendingPathComponent("chat/completions"))
         request.httpMethod = "POST"
         request.timeoutInterval = 300
         request.setValue("application/json", forHTTPHeaderField: "content-type")
+        // Magpie 按程序名区分调用方，用量统计靠它筛出本 App 的请求
+        request.setValue(MagpieUsage.userAgent, forHTTPHeaderField: "User-Agent")
         if !apiKey.isEmpty { request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization") }
         request.httpBody = try JSONSerialization.data(withJSONObject: [
             "model": model,
@@ -49,6 +57,8 @@ struct VisionChatClient {
         guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
               let choice = (json["choices"] as? [[String: Any]])?.first
         else { throw ClientError.emptyResponse }
+        responseID = json["id"] as? String
+        ok = true
         if choice["finish_reason"] as? String == "length" { throw ClientError.truncated }
         guard let text = (choice["message"] as? [String: Any])?["content"] as? String, !text.isEmpty else {
             throw ClientError.emptyResponse

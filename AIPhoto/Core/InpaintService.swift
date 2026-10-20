@@ -45,7 +45,7 @@ enum InpaintService: String, CaseIterable, Identifiable {
     }
 
     /// 按当前设置创建服务；未配置时抛错，由界面提示用户去设置
-    static func makeProvider() async throws -> InpaintProvider {
+    static func makeProvider(purpose: AIPurpose) async throws -> InpaintProvider {
         switch current {
         case .none:
             throw ConfigError.notConfigured
@@ -59,7 +59,8 @@ enum InpaintService: String, CaseIterable, Identifiable {
             return OpenAICompatibleInpainter(
                 baseURL: baseURL,
                 apiKey: try await KeychainStore.loadIfSaved(account: keychainAccount) ?? "",
-                model: model.isEmpty ? nil : model
+                model: model.isEmpty ? nil : model,
+                purpose: purpose
             )
         }
     }
@@ -72,6 +73,7 @@ struct OpenAICompatibleInpainter: InpaintProvider {
     let apiKey: String
     /// nil 表示不传 model，由服务使用其默认图片模型
     let model: String?
+    let purpose: AIPurpose
 
     static let prompt = """
     Remove whatever is inside the masked (transparent) area and fill it so it blends seamlessly with the surrounding scene: \
@@ -93,6 +95,9 @@ struct OpenAICompatibleInpainter: InpaintProvider {
     }
 
     func inpaint(image: CGImage, mask: CGImage, prompt: String?) async throws -> CGImage {
+        let start = Date()
+        var ok = false
+        defer { UsageLog.shared.record(purpose: purpose, start: start, responseID: nil, requestedModel: model ?? "", ok: ok) }
         guard let imageData = CleanupEngine.pngData(image),
               let maskImage = Self.transparentMask(from: mask),
               let maskData = CleanupEngine.pngData(maskImage)
@@ -118,6 +123,7 @@ struct OpenAICompatibleInpainter: InpaintProvider {
         request.httpMethod = "POST"
         request.timeoutInterval = 300
         request.setValue("multipart/form-data; boundary=\(boundary)", forHTTPHeaderField: "Content-Type")
+        request.setValue(MagpieUsage.userAgent, forHTTPHeaderField: "User-Agent")
         if !apiKey.isEmpty { request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization") }
         request.httpBody = body
 
@@ -142,6 +148,7 @@ struct OpenAICompatibleInpainter: InpaintProvider {
         guard let source = CGImageSourceCreateWithData(imageBytes as CFData, nil),
               let result = CGImageSourceCreateImageAtIndex(source, 0, nil)
         else { throw InpaintError.noImage }
+        ok = true
         return result
     }
 

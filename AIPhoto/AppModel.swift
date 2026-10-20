@@ -116,6 +116,9 @@ final class AppModel {
     var showSavePreset = false
     /// 最近一次 AI 对本场诉求的理解，初修总结里展示
     var lastLookSummary: String?
+    var showUsage = false
+    /// 最近一次一键初修的起止时间，初修总结里按它统计本次花费
+    var lastRetouchWindow: (start: Date, end: Date)?
 
     init() {
         do {
@@ -184,6 +187,7 @@ final class AppModel {
     func load(_ folder: URL) {
         guard !isBusy else { return }
         folderURL = folder
+        UsageLog.shared.setShoot(folder.lastPathComponent)
         photos = [:]
         groups = []
         selectedGroupID = nil
@@ -300,13 +304,13 @@ final class AppModel {
 
     func runAI(all: Bool) {
         Task {
-            guard let client = await makeVisionClient() else { return }
+            guard let client = await makeVisionClient(purpose: .culling) else { return }
             perform("AI 选片中…") { try await self.rankWithAI(client: client, all: all) }
         }
     }
 
     /// 看图模型客户端，AI 选片和定位干扰物共用；配置有问题时弹提示并返回 nil
-    private func makeVisionClient(model: String = AppSettings.model) async -> VisionChatClient? {
+    private func makeVisionClient(model: String = AppSettings.model, purpose: AIPurpose) async -> VisionChatClient? {
         let text = AppSettings.baseURL.trimmingCharacters(in: .whitespaces)
         guard let baseURL = URL(string: text), baseURL.scheme?.hasPrefix("http") == true else {
             alert = AlertInfo(title: "选片模型地址无效", message: "请在「小宇专属 › 设置…」里检查接口地址：\(text)")
@@ -316,7 +320,8 @@ final class AppModel {
             return VisionChatClient(
                 baseURL: baseURL,
                 apiKey: try await KeychainStore.loadIfSaved(account: AppSettings.keychainAccount) ?? "",
-                model: model
+                model: model,
+                purpose: purpose
             )
         } catch {
             alert = AlertInfo(title: "读取 API 密钥失败", message: error.localizedDescription)
@@ -633,7 +638,7 @@ final class AppModel {
     func removeDistractions() {
         guard let id = selectedPhotoID else { return }
         Task {
-            guard let client = await makeVisionClient() else { return }
+            guard let client = await makeVisionClient(purpose: .locate) else { return }
             await locateAndRemove(photoID: id, client: client)
         }
     }
@@ -690,11 +695,13 @@ final class AppModel {
     }
 
     private func runQuickRetouch(_ targets: [Photo], preset: RetouchPreset?, note: String) async {
-        guard let client = await makeVisionClient() else { return }
+        guard let client = await makeVisionClient(purpose: .locate) else { return }
         recordUndo(.edit, ids: targets.map(\.id), label: "一键初修")
         for photo in targets { photos[photo.id]?.retouchLog = RetouchLog() }
         retouchProgress = (0, targets.count)
         lastLookSummary = nil
+        let retouchStart = Date()
+        lastRetouchWindow = nil
         // 选了预设或写了诉求：所有照片按预设重新调色（用户确认，手动修过的也重做，可撤销）；否则沿用原来的自动调色
         let usesPreset = preset != nil || !note.isEmpty
         if usesPreset {
@@ -722,6 +729,7 @@ final class AppModel {
         // 去杂物还在后台排队时，等它们做完再弹总结
         while !cleanupJobs.isEmpty { try? await Task.sleep(for: .seconds(1)) }
         retouchProgress = nil
+        lastRetouchWindow = (retouchStart, Date())
         showRetouchSummary = true
     }
 
@@ -778,7 +786,8 @@ final class AppModel {
         let outcome: Result<CleanupPatch, Error>
         do {
             guard let photo = photos[job.photoID] else { throw CleanupEngine.CleanupError.unreadable }
-            let provider = try await InpaintService.makeProvider()
+            let purpose: AIPurpose = job.fromChat ? .chatRedraw : job.prompt == Compositor.blendPrompt ? .compositeBlend : .cleanup
+            let provider = try await InpaintService.makeProvider(purpose: purpose)
             outcome = .success(try await CleanupEngine.run(
                 photo: photo, strokes: job.strokes, prompt: job.prompt, folder: folder, provider: provider
             ))
@@ -849,7 +858,7 @@ final class AppModel {
         }
 
         var look: LookAdjust?
-        if !note.isEmpty, let client = await makeVisionClient(model: AppSettings.chatModel) {
+        if !note.isEmpty, let client = await makeVisionClient(model: AppSettings.chatModel, purpose: .look) {
             // 均匀取最多 4 张代表照片，让模型在已调好的现状上判断幅度
             let sampleIDs = Self.spread(ids.filter { base[$0] != nil }, count: 4)
             let samples = sampleIDs.compactMap { id -> (Photo, EditSettings)? in photos[id].flatMap { p in base[id].map { (p, $0) } } }
@@ -965,7 +974,7 @@ final class AppModel {
         chattingPhotoIDs.insert(id)
         Task {
             defer { chattingPhotoIDs.remove(id) }
-            guard let client = await makeVisionClient(model: AppSettings.chatModel) else {
+            guard let client = await makeVisionClient(model: AppSettings.chatModel, purpose: .chat) else {
                 appendChat(id, ChatMessage(role: .assistant, text: "看图模型的设置有问题，没有执行。", isError: true))
                 return
             }
@@ -1613,5 +1622,20 @@ extension AppModel {
                 composite?.status = "合成失败：\(error.localizedDescription)"
             }
         }
+    }
+}
+
+// MARK: - AI 用量
+
+extension AppModel {
+    /// 本地日志（哪场、做什么）与 Magpie 记录（实际模型、token、折算价）对账
+    func usageReport(since: Date, until: Date = .distantFuture, shoot: String? = nil) async throws -> (UsageReport, [MagpieUsage.Quota]) {
+        guard let baseURL = URL(string: AppSettings.baseURL.trimmingCharacters(in: .whitespaces)) else {
+            throw VisionChatClient.ClientError.emptyResponse
+        }
+        let entries = UsageLog.shared.entries(since: since).filter { $0.start <= until && (shoot == nil || $0.shoot == shoot) }
+        async let rows = MagpieUsage.rows(baseURL: baseURL)
+        async let quotas = MagpieUsage.quotas(baseURL: baseURL)
+        return (UsageReport.build(entries: entries, rows: try await rows), (try? await quotas) ?? [])
     }
 }

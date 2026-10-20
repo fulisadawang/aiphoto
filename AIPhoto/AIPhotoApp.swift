@@ -89,6 +89,7 @@ struct AIPhotoApp: App {
                 Button("从修图样片学习风格…") { model.learnStyle() }
                     .disabled(model.isBusy)
                 Button("管理修图预设…") { model.showPresetManager = true }
+                Button("AI 用量…") { model.showUsage = true }
             }
         }
 

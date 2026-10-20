@@ -136,6 +136,7 @@ struct ContentView: View {
         .sheet(isPresented: $model.showPresetManager) { PresetManagerSheet().environment(model) }
         .sheet(isPresented: $model.showSavePreset) { SavePresetSheet().environment(model) }
         .sheet(isPresented: $model.showCompositePicker) { CompositeSourcePicker().environment(model) }
+        .sheet(isPresented: $model.showUsage) { UsageView().environment(model) }
         .sheet(isPresented: $model.showRetouchSummary) { RetouchSummaryView().environment(model) }
         .alert(item: $model.alert) { info in
             Alert(title: Text(info.title), message: Text(info.message))

@@ -69,6 +69,7 @@ struct RetouchStartSheet: View {
 struct RetouchSummaryView: View {
     @Environment(AppModel.self) private var model
     @Environment(\.dismiss) private var dismiss
+    @State private var retouchCost: String?
 
     var body: some View {
         let logged = model.photos.values
@@ -84,6 +85,12 @@ struct RetouchSummaryView: View {
                 Button("关闭") { dismiss() }.keyboardShortcut(.cancelAction)
             }
             .padding(16)
+            if let cost = retouchCost {
+                Label(cost, systemImage: "yensign.circle")
+                    .font(.callout)
+                    .padding(.horizontal, 16)
+                    .padding(.bottom, 6)
+            }
             if let summary = model.lastLookSummary {
                 Label("AI 对本场诉求的理解：\(summary)", systemImage: "text.bubble")
                     .font(.callout)
@@ -103,6 +110,14 @@ struct RetouchSummaryView: View {
             }
         }
         .frame(width: 620, height: 560)
+        .task {
+            // 出图结果在 Magpie 里落账稍慢，稍等一下再取
+            guard let window = model.lastRetouchWindow else { return }
+            try? await Task.sleep(for: .seconds(2))
+            guard let (report, _) = try? await model.usageReport(since: window.start, until: window.end) else { return }
+            retouchCost = "本次初修调用 AI \(report.total.calls) 次，约 \(UsageView.yuan(report.total.cost))"
+                + (report.total.unpriced > 0 ? "（\(report.total.unpriced) 次未计价）" : "")
+        }
     }
 
     private func row(_ photo: Photo, emphasize: Bool) -> some View {
