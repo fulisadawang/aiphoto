@@ -3,6 +3,26 @@
     <channel>
         <title>AIPhoto</title>
         <item>
+            <title>0.5.0</title>
+            <pubDate>Tue, 20 Oct 2026 15:20:41 +0800</pubDate>
+            <sparkle:version>6</sparkle:version>
+            <sparkle:shortVersionString>0.5.0</sparkle:shortVersionString>
+            <sparkle:minimumSystemVersion>15.0</sparkle:minimumSystemVersion>
+            <sparkle:hardwareRequirements>arm64</sparkle:hardwareRequirements>
+            <description sparkle:format="markdown"><![CDATA[## v0.5.0
+
+### AI 用量统计
+- 菜单「选片 › AI 用量…」：看今天 / 近 7 天 / 近 30 天调用 AI 花了多少，按功能、场次、模型拆开
+- 显示各订阅账号的剩余额度
+- 一键初修总结里显示本次花费
+
+### 改进
+- AI 选片和找杂物默认改用 Gemini（之前的默认会被转到 Claude）
+- 设置页按「选片」「AI 服务」「用量」分页，更清楚
+]]></description>
+            <enclosure url="https://github.com/fulisadawang/aiphoto/releases/download/v0.5.0/AIPhoto-0.5.0.zip" length="5407651" type="application/octet-stream" sparkle:edSignature="h6UBVIfHB5pi/RUuV0CtSVj1loGtYBQRI12+fl4wrP2wgKoK2TYVArzfbKC0cZixawXEJwauz4ETkvm3MdWNDw=="/>
+        </item>
+        <item>
             <title>0.4.0</title>
             <pubDate>Tue, 20 Oct 2026 11:46:24 +0800</pubDate>
             <sparkle:version>5</sparkle:version>
@@ -44,20 +64,6 @@
 - 套用预设后颜色溢出过多时自动减弱，保留纹理
 ]]></description>
             <enclosure url="https://github.com/fulisadawang/aiphoto/releases/download/v0.3.0/AIPhoto-0.3.0.zip" length="5186983" type="application/octet-stream" sparkle:edSignature="X99GX/5KBPukrRjeDuN7xxzMSqOuisONMY6e/W7B+SQP765dAQ82h+i+SssSadMuSoqgUVx0sE/NzLII7tt0Bw=="/>
-        </item>
-        <item>
-            <title>0.2.1</title>
-            <pubDate>Mon, 19 Oct 2026 21:07:53 +0800</pubDate>
-            <sparkle:version>3</sparkle:version>
-            <sparkle:shortVersionString>0.2.1</sparkle:shortVersionString>
-            <sparkle:minimumSystemVersion>15.0</sparkle:minimumSystemVersion>
-            <sparkle:hardwareRequirements>arm64</sparkle:hardwareRequirements>
-            <description sparkle:format="markdown"><![CDATA[## v0.2.1
-
-- 新的 App 图标：红色草顶小木屋
-- App 名字改为「小宇专属」
-]]></description>
-            <enclosure url="https://github.com/fulisadawang/aiphoto/releases/download/v0.2.1/AIPhoto-0.2.1.zip" length="5078817" type="application/octet-stream" sparkle:edSignature="PGA6HiaUq2rZWkurzUtGPek2JF+E2ZmLWgufp9f5h5nQv2rqIaoSmsn9mOBHm8DvBZiFhowBRczCCn6OCL7lCg=="/>
         </item>
     </channel>
 </rss>
