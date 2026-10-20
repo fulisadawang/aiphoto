@@ -97,7 +97,7 @@ struct AIServiceSettings: View {
 
     private var tierSection: some View {
         let _ = revision
-        let isRecommended = ModelCatalog.isAllRecommended
+        let current = ModelCatalog.currentTier
         return VStack(alignment: .leading, spacing: 8) {
             Text("你更在意哪一点？选一个，App 会给每件事配好合适的 AI")
                 .font(.callout)
@@ -105,22 +105,30 @@ struct AIServiceSettings: View {
                 .padding(.top, 18)
             HStack(spacing: 10) {
                 TierCard(symbol: "banknote", tint: .green, title: "省钱",
-                         detail: "全部用便宜的 AI，找杂物偶尔框不准", price: "实测后开放", selected: false, enabled: false) {}
+                         detail: "选片换成更便宜的 AI；找杂物和改图仍用准的", price: "未实测 · 花费看「用量」",
+                         selected: current == .saving) { choose(.saving) }
                 TierCard(symbol: "scalemass", tint: .accentColor, title: "推荐",
-                         detail: "选片求快，找杂物和改图求准。大多数时候选它", price: "每 100 张价格实测后填入",
-                         selected: isRecommended, enabled: true) {
-                    ModelCatalog.resetToRecommended()
-                    revision += 1
-                }
+                         detail: "选片求快，找杂物和改图求准。大多数时候选它", price: "实测过 · 花费看「用量」",
+                         selected: current == .recommended) { choose(.recommended) }
                 TierCard(symbol: "diamond", tint: .purple, title: "效果优先",
-                         detail: "每一步都用最准的 AI，适合重要交付", price: "实测后开放", selected: false, enabled: false) {}
+                         detail: "每一步都用更强的 AI，更慢也更贵，适合重要交付", price: "未实测 · 花费看「用量」",
+                         selected: current == .best) { choose(.best) }
             }
-            if !isRecommended {
-                Label("当前是自定义设置（在高级设置里改过）。点「推荐」可恢复。", systemImage: "slider.horizontal.3")
+            if current == nil {
+                Label("当前是自定义设置（在高级设置里改过）。点任一档位可恢复。", systemImage: "slider.horizontal.3")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            } else if current != .recommended {
+                Label("这个档位的模型还没用你的照片测过；出错时会自动换回推荐模型。", systemImage: "info.circle")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
         }
+    }
+
+    private func choose(_ tier: ModelCatalog.Tier) {
+        ModelCatalog.apply(tier)
+        revision += 1
     }
 
     private var advancedHeader: some View {
@@ -427,7 +435,6 @@ private struct TierCard: View {
     let detail: String
     let price: String
     let selected: Bool
-    let enabled: Bool
     let action: () -> Void
 
     var body: some View {
@@ -456,12 +463,9 @@ private struct TierCard: View {
                 RoundedRectangle(cornerRadius: 10)
                     .strokeBorder(selected ? Color.accentColor : Color.secondary.opacity(0.25), lineWidth: selected ? 2 : 0.5)
             }
-            .opacity(enabled ? 1 : 0.55)
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .disabled(!enabled)
-        .help(enabled ? "" : "要先用你的照片实测，才能定这个档位用哪些模型")
     }
 }
 

@@ -31,9 +31,8 @@ struct VisionChatClient {
         do {
             return try await send(model: model, system: system, content: content, fallback: false)
         } catch {
-            // 只在服务报错或连不上时换模型；回复格式不对、被截断属于内容问题，换模型不一定好，照常报错
-            guard let fallbackModel, error is URLError || { if case .http = error as? ClientError { true } else { false } }()
-            else { throw error }
+            // 选的模型报错、连不上、回复格式不对都换推荐模型再试一次：没实测过的模型可能不支持看图或不按格式回复
+            guard let fallbackModel else { throw error }
             return try await send(model: fallbackModel, system: system, content: content, fallback: true)
         }
     }

@@ -60,6 +60,8 @@ struct ModelOption: Identifiable, Hashable {
 enum ModelCatalog {
     /// 不用 auto-auto：实测会被路由到 Claude（用户明确不用 Claude），而且对话改图 3 次都把小狗框到木门上，Gemini 3 次都框准
     static let gemini = "group/auto-gemini-3-8-flash"
+    static let glm = "workbuddy/glm-5v-turbo"
+    static let gptSol = "codex/gpt-6.1-sol"
 
     /// 只有现在在用的模型实测过；其他候选按用户决定先不实测，标「未测试」（需求清单第 14 节）
     static func options(for use: AIUse) -> [ModelOption] {
@@ -68,12 +70,14 @@ enum ModelCatalog {
             [
                 ModelOption(id: gemini, name: "Gemini 3.8 Flash", note: "推荐", recommended: true),
                 ModelOption(id: "codex/gpt-5.6-luna", name: "GPT-5.6 Luna", note: "未测试"),
-                ModelOption(id: "workbuddy/glm-5v-turbo", name: "GLM-5V Turbo", note: "未测试"),
+                ModelOption(id: glm, name: "GLM-5V Turbo", note: "未测试"),
+                ModelOption(id: gptSol, name: "GPT-6.1 Sol", note: "未测试"),
             ]
         case .locate:
             [
                 ModelOption(id: gemini, name: "Gemini 3.8 Flash", note: "推荐 · 定位准", recommended: true),
                 ModelOption(id: "codex/gpt-6-luna", name: "GPT-6 Luna", note: "未测试"),
+                ModelOption(id: gptSol, name: "GPT-6.1 Sol", note: "未测试"),
                 // 实测会被路由到 Claude，而且框不准
                 ModelOption(id: "group/auto-auto", name: "auto-auto", note: "不建议 · 框不准", discouraged: true),
             ]
@@ -81,6 +85,7 @@ enum ModelCatalog {
             [
                 ModelOption(id: gemini, name: "Gemini 3.8 Flash", note: "推荐", recommended: true),
                 ModelOption(id: "codex/gpt-6-luna", name: "GPT-6 Luna", note: "未测试"),
+                ModelOption(id: gptSol, name: "GPT-6.1 Sol", note: "未测试"),
             ]
         case .look:
             [ModelOption(id: "", name: "同 AI 选片", note: "推荐", recommended: true)]
@@ -88,6 +93,29 @@ enum ModelCatalog {
             // Magpie 不传模型时用 gpt-image-2；传 auto-auto 会被路由到只回文字的模型
             [ModelOption(id: "", name: "gpt-image-2", note: "推荐 · 服务默认", recommended: true)]
         }
+    }
+
+    /// 设置页的三个档位。省钱和效果优先的组合还没用实拍测过（用户要求先开放）：
+    /// 省钱只把选片换成更便宜的模型，找杂物和改图仍用定位准的推荐模型，避免框偏擦到孩子
+    enum Tier: CaseIterable {
+        case saving, recommended, best
+
+        func model(for use: AIUse) -> String {
+            switch (self, use) {
+            case (_, .image), (_, .look), (.recommended, _): ModelCatalog.recommended(for: use)
+            case (.saving, .culling): glm
+            case (.saving, _): ModelCatalog.recommended(for: use)
+            case (.best, _): gptSol
+            }
+        }
+    }
+
+    static var currentTier: Tier? {
+        Tier.allCases.first { tier in AIUse.allCases.allSatisfy { stored($0) == tier.model(for: $0) } }
+    }
+
+    static func apply(_ tier: Tier) {
+        for use in AIUse.allCases { UserDefaults.standard.set(tier.model(for: use), forKey: use.key) }
     }
 
     static func recommended(for use: AIUse) -> String {
@@ -105,13 +133,7 @@ enum ModelCatalog {
         return value
     }
 
-    static var isAllRecommended: Bool {
-        AIUse.allCases.allSatisfy { stored($0) == recommended(for: $0) }
-    }
-
-    static func resetToRecommended() {
-        for use in AIUse.allCases { UserDefaults.standard.set(recommended(for: use), forKey: use.key) }
-    }
+    static func resetToRecommended() { apply(.recommended) }
 
     /// 出错时换用的模型：开关打开、且当前用的不是推荐模型时才有
     static func fallback(for use: AIUse, current: String) -> String? {
