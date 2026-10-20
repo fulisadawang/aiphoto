@@ -1,27 +1,5 @@
 import SwiftUI
 
-/// 右侧面板里的入口：点开后整列换成对话
-struct ChatEntrySection: View {
-    @Environment(AppModel.self) private var model
-    let photo: Photo
-
-    var body: some View {
-        Section("对话改图") {
-            Button {
-                model.chatPanelOpen = true
-            } label: {
-                Label("用一句话修改这张照片…", systemImage: "bubble.left.and.text.bubble.right")
-            }
-            if let last = photo.chat?.last {
-                Text(last.text)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(2)
-            }
-        }
-    }
-}
-
 /// 对话改图：多轮对话，作用于当前照片
 struct ChatPanel: View {
     @Environment(AppModel.self) private var model
@@ -35,15 +13,10 @@ struct ChatPanel: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            HStack {
-                Label("对话改图", systemImage: "bubble.left.and.text.bubble.right").font(.headline)
-                Spacer()
-                Button { model.chatPanelOpen = false } label: { Image(systemName: "xmark.circle.fill") }
-                    .buttonStyle(.borderless)
-                    .foregroundStyle(.secondary)
-                    .help("关闭对话，回到修图面板")
-            }
-            .padding([.horizontal, .top], 12)
+            Label("对话改图", systemImage: "bubble.left.and.text.bubble.right")
+                .font(.headline)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding([.horizontal, .top], 12)
             Text(photo.fileName)
                 .font(.caption)
                 .foregroundStyle(.secondary)

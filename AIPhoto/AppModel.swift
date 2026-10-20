@@ -91,8 +91,20 @@ final class AppModel {
     var cleanupJobs: [CleanupJob] = []
     /// 正在让 AI 识别干扰物位置的照片
     var locatingPhotoIDs: Set<String> = []
-    /// 对话改图面板是否打开
-    var chatPanelOpen = false
+    /// 右侧面板：选片时只看判断用的信息，修图时用工具栏切换工具。两者都记住上次的选择
+    var inspectorMode: InspectorMode = InspectorMode(rawValue: UserDefaults.standard.string(forKey: "inspectorMode") ?? "") ?? .culling {
+        didSet {
+            UserDefaults.standard.set(inspectorMode.rawValue, forKey: "inspectorMode")
+            if inspectorMode == .culling { exitBrush() }
+        }
+    }
+    var editTool: EditTool = EditTool(rawValue: UserDefaults.standard.string(forKey: "editTool") ?? "") ?? .adjust {
+        didSet {
+            UserDefaults.standard.set(editTool.rawValue, forKey: "editTool")
+            // 画笔只属于去杂物工具：离开时关掉，避免在看不到画笔设置时误涂
+            if editTool != .cleanup { exitBrush() }
+        }
+    }
     /// 多图合成进行中；nil 表示没有在合成
     var composite: CompositeSession?
     var showCompositePicker = false
@@ -187,6 +199,7 @@ final class AppModel {
     func load(_ folder: URL) {
         guard !isBusy else { return }
         folderURL = folder
+        inspectorMode = .culling
         UsageLog.shared.setShoot(folder.lastPathComponent)
         photos = [:]
         groups = []
@@ -597,7 +610,19 @@ final class AppModel {
 
     func toggleBrush() {
         brushMode.toggle()
-        if !brushMode { strokes = [] }
+        if brushMode { showTool(.cleanup) } else { strokes = [] }
+    }
+
+    private func exitBrush() {
+        guard brushMode else { return }
+        brushMode = false
+        strokes = []
+    }
+
+    /// 切到修图模式并选中某个工具（画笔、对话改图等入口调用）
+    func showTool(_ tool: EditTool) {
+        inspectorMode = .editing
+        editTool = tool
     }
 
     func beginStroke(at point: CGPoint) {
@@ -1177,7 +1202,10 @@ final class AppModel {
         gridMode.toggle()
         brushMode = false
         strokes = []
-        if gridMode { gridSelection = selectedPhotoID.map { [$0] } ?? [] }
+        if gridMode {
+            gridSelection = selectedPhotoID.map { [$0] } ?? []
+            inspectorMode = .culling
+        }
     }
 
     /// 单击选中一张；⌘ 单击增减；⇧ 单击选中连续范围
@@ -1637,5 +1665,36 @@ extension AppModel {
         async let rows = MagpieUsage.rows(baseURL: baseURL)
         async let quotas = MagpieUsage.quotas(baseURL: baseURL)
         return (UsageReport.build(entries: entries, rows: try await rows), (try? await quotas) ?? [])
+    }
+}
+
+enum InspectorMode: String {
+    case culling, editing
+}
+
+/// 修图模式下右侧工具栏的工具
+enum EditTool: String, CaseIterable, Identifiable {
+    case adjust, cleanup, composite, chat, log
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .adjust: "调色"
+        case .cleanup: "去杂物"
+        case .composite: "合成"
+        case .chat: "对话改图"
+        case .log: "初修记录"
+        }
+    }
+
+    var symbol: String {
+        switch self {
+        case .adjust: "slider.horizontal.3"
+        case .cleanup: "eraser"
+        case .composite: "square.on.square.dashed"
+        case .chat: "bubble.left.and.text.bubble.right"
+        case .log: "list.bullet.clipboard"
+        }
     }
 }

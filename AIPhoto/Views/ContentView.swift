@@ -42,7 +42,7 @@ struct ContentView: View {
         }
         .inspector(isPresented: $showInspector) {
             InspectorView()
-                .inspectorColumnWidth(min: 260, ideal: 300, max: 380)
+                .inspectorColumnWidth(min: 320, ideal: 350, max: 420)
         }
         .onKeyPress(.leftArrow) { if isEditingText { return .ignored }; model.gridMode ? model.gridStep(by: -1) : model.previousPhoto(); return .handled }
         .onKeyPress(.rightArrow) { if isEditingText { return .ignored }; model.gridMode ? model.gridStep(by: 1) : model.nextPhoto(); return .handled }
