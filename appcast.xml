@@ -3,6 +3,24 @@
     <channel>
         <title>AIPhoto</title>
         <item>
+            <title>0.6.0</title>
+            <pubDate>Tue, 20 Oct 2026 16:31:06 +0800</pubDate>
+            <sparkle:version>7</sparkle:version>
+            <sparkle:shortVersionString>0.6.0</sparkle:shortVersionString>
+            <sparkle:minimumSystemVersion>15.0</sparkle:minimumSystemVersion>
+            <sparkle:hardwareRequirements>arm64</sparkle:hardwareRequirements>
+            <description sparkle:format="markdown"><![CDATA[## v0.6.0
+
+### 右侧面板改版
+- 顶部切换「选片 / 修图」两种模式
+- 选片模式只放判断用的信息：大号选用 / 淘汰按钮、星级、AI 评价、直方图与拍摄参数，一屏看完
+- 修图模式用左侧竖向工具栏切换：调色、去杂物、合成、对话改图、初修记录，一次只显示一个工具
+- 按 B、点对话改图时自动切到对应工具；离开去杂物工具时画笔自动关闭
+- 初修有需要检查的问题时，「初修记录」图标上显示红点
+]]></description>
+            <enclosure url="https://github.com/fulisadawang/aiphoto/releases/download/v0.6.0/AIPhoto-0.6.0.zip" length="5435373" type="application/octet-stream" sparkle:edSignature="ScgLQyyrgKUQqHXYv1eFumiTOgOVZe/qVWK5aV9hLiYOwIYFDpPXeyqRsI/L8Qg892BaylyNxD7AcYt8XV5VCA=="/>
+        </item>
+        <item>
             <title>0.5.0</title>
             <pubDate>Tue, 20 Oct 2026 15:20:41 +0800</pubDate>
             <sparkle:version>6</sparkle:version>
@@ -40,30 +58,6 @@
 - 合成结果可以撤销，也可以按 \ 对比前后
 ]]></description>
             <enclosure url="https://github.com/fulisadawang/aiphoto/releases/download/v0.4.0/AIPhoto-0.4.0.zip" length="5273806" type="application/octet-stream" sparkle:edSignature="dL2avj4ab18jeaS02RW4DckMFy07C7WGuSK6e0ZcPTUQSEgr603uX11WIAsHVXWYpKHarw05T22kj47U75+HDA=="/>
-        </item>
-        <item>
-            <title>0.3.0</title>
-            <pubDate>Tue, 20 Oct 2026 11:24:29 +0800</pubDate>
-            <sparkle:version>4</sparkle:version>
-            <sparkle:shortVersionString>0.3.0</sparkle:shortVersionString>
-            <sparkle:minimumSystemVersion>15.0</sparkle:minimumSystemVersion>
-            <sparkle:hardwareRequirements>arm64</sparkle:hardwareRequirements>
-            <description sparkle:format="markdown"><![CDATA[## v0.3.0
-
-### 自定义修图预设
-- 把常用的修法存成预设：风格、磨皮、对比度、饱和度、高光阴影，以及一段给 AI 的描述
-- 修图面板「套用预设」到当前照片或全部已选；「存为预设」把修好的照片存下来
-- 可设默认预设，一键初修时自动选中
-
-### 本场诉求
-- 一键初修前可以写一句本场要求（如"整体通透偏暖，地上的落叶保留"）
-- AI 把要求换算成整场统一的调色，去杂物和对话改图也会按要求保留或去除
-
-### 改进
-- 自动调色不再把红墙、红衣服提亮到溢出
-- 套用预设后颜色溢出过多时自动减弱，保留纹理
-]]></description>
-            <enclosure url="https://github.com/fulisadawang/aiphoto/releases/download/v0.3.0/AIPhoto-0.3.0.zip" length="5186983" type="application/octet-stream" sparkle:edSignature="X99GX/5KBPukrRjeDuN7xxzMSqOuisONMY6e/W7B+SQP765dAQ82h+i+SssSadMuSoqgUVx0sE/NzLII7tt0Bw=="/>
         </item>
     </channel>
 </rss>
