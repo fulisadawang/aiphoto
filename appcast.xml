@@ -3,6 +3,27 @@
     <channel>
         <title>AIPhoto</title>
         <item>
+            <title>0.8.0</title>
+            <pubDate>Tue, 20 Oct 2026 19:03:47 +0800</pubDate>
+            <sparkle:version>9</sparkle:version>
+            <sparkle:shortVersionString>0.8.0</sparkle:shortVersionString>
+            <sparkle:minimumSystemVersion>15.0</sparkle:minimumSystemVersion>
+            <sparkle:hardwareRequirements>arm64</sparkle:hardwareRequirements>
+            <description sparkle:format="markdown"><![CDATA[## AI 模型设置改版
+
+- 设置 › AI 服务重新设计：最上面显示 AI 能不能用，连不上时说明怎么办；选一个档位就配好模型（目前只有「推荐」，其他档位实测后开放）
+- 高级设置可分别给 AI 选片、找杂物、对话改图、理解修图描述、画图选模型，也可以自定义
+- 选的模型出错时自动换成推荐模型重试，「用量」里会标出次数
+
+## 对话改图面板改版
+
+- 顶部可以临时换模型，只对这次对话有效
+- AI 的每次修改显示成卡片：改了什么、后台进度一目了然
+- 最新一步可以单独「撤销这步」
+]]></description>
+            <enclosure url="https://github.com/fulisadawang/aiphoto/releases/download/v0.8.0/AIPhoto-0.8.0.zip" length="5658370" type="application/octet-stream" sparkle:edSignature="XKNjCqLm4K+Y805CXrA902koYIIO1gypfd/31ETTOJEXQev8HfZTuZ5uU0L2xhXbS+upx1NG1SQiEuZc/n6iCg=="/>
+        </item>
+        <item>
             <title>0.7.0</title>
             <pubDate>Tue, 20 Oct 2026 16:51:26 +0800</pubDate>
             <sparkle:version>8</sparkle:version>
@@ -38,26 +59,6 @@
 - 初修有需要检查的问题时，「初修记录」图标上显示红点
 ]]></description>
             <enclosure url="https://github.com/fulisadawang/aiphoto/releases/download/v0.6.0/AIPhoto-0.6.0.zip" length="5435373" type="application/octet-stream" sparkle:edSignature="ScgLQyyrgKUQqHXYv1eFumiTOgOVZe/qVWK5aV9hLiYOwIYFDpPXeyqRsI/L8Qg892BaylyNxD7AcYt8XV5VCA=="/>
-        </item>
-        <item>
-            <title>0.5.0</title>
-            <pubDate>Tue, 20 Oct 2026 15:20:41 +0800</pubDate>
-            <sparkle:version>6</sparkle:version>
-            <sparkle:shortVersionString>0.5.0</sparkle:shortVersionString>
-            <sparkle:minimumSystemVersion>15.0</sparkle:minimumSystemVersion>
-            <sparkle:hardwareRequirements>arm64</sparkle:hardwareRequirements>
-            <description sparkle:format="markdown"><![CDATA[## v0.5.0
-
-### AI 用量统计
-- 菜单「选片 › AI 用量…」：看今天 / 近 7 天 / 近 30 天调用 AI 花了多少，按功能、场次、模型拆开
-- 显示各订阅账号的剩余额度
-- 一键初修总结里显示本次花费
-
-### 改进
-- AI 选片和找杂物默认改用 Gemini（之前的默认会被转到 Claude）
-- 设置页按「选片」「AI 服务」「用量」分页，更清楚
-]]></description>
-            <enclosure url="https://github.com/fulisadawang/aiphoto/releases/download/v0.5.0/AIPhoto-0.5.0.zip" length="5407651" type="application/octet-stream" sparkle:edSignature="h6UBVIfHB5pi/RUuV0CtSVj1loGtYBQRI12+fl4wrP2wgKoK2TYVArzfbKC0cZixawXEJwauz4ETkvm3MdWNDw=="/>
         </item>
     </channel>
 </rss>
