@@ -3,6 +3,21 @@
     <channel>
         <title>AIPhoto</title>
         <item>
+            <title>0.8.2</title>
+            <pubDate>Tue, 20 Oct 2026 22:22:36 +0800</pubDate>
+            <sparkle:version>11</sparkle:version>
+            <sparkle:shortVersionString>0.8.2</sparkle:shortVersionString>
+            <sparkle:minimumSystemVersion>15.0</sparkle:minimumSystemVersion>
+            <sparkle:hardwareRequirements>arm64</sparkle:hardwareRequirements>
+            <description sparkle:format="markdown"><![CDATA[## 改进
+
+- Dock 和访达里显示的名字改为「小宇专属」
+- 点左上角关闭只关窗口，App 留在 Dock 里；点 Dock 图标重新打开，选片进度和撤销记录都还在
+- 设置里的接口地址可以填任意 http 地址（局域网其他电脑、域名都可以）
+]]></description>
+            <enclosure url="https://github.com/fulisadawang/aiphoto/releases/download/v0.8.2/AIPhoto-0.8.2.zip" length="5665909" type="application/octet-stream" sparkle:edSignature="XP9Od876XKXv3xaOpp0VrUa2/tXaaY38FbNbcXCZLs4CmtZX/Yvzkp2gzXSnY2kFtISC55wlifvHFlY5gi6nBw=="/>
+        </item>
+        <item>
             <title>0.8.1</title>
             <pubDate>Tue, 20 Oct 2026 19:15:39 +0800</pubDate>
             <sparkle:version>10</sparkle:version>
@@ -38,25 +53,6 @@
 - 最新一步可以单独「撤销这步」
 ]]></description>
             <enclosure url="https://github.com/fulisadawang/aiphoto/releases/download/v0.8.0/AIPhoto-0.8.0.zip" length="5658370" type="application/octet-stream" sparkle:edSignature="XKNjCqLm4K+Y805CXrA902koYIIO1gypfd/31ETTOJEXQev8HfZTuZ5uU0L2xhXbS+upx1NG1SQiEuZc/n6iCg=="/>
-        </item>
-        <item>
-            <title>0.7.0</title>
-            <pubDate>Tue, 20 Oct 2026 16:51:26 +0800</pubDate>
-            <sparkle:version>8</sparkle:version>
-            <sparkle:shortVersionString>0.7.0</sparkle:shortVersionString>
-            <sparkle:minimumSystemVersion>15.0</sparkle:minimumSystemVersion>
-            <sparkle:hardwareRequirements>arm64</sparkle:hardwareRequirements>
-            <description sparkle:format="markdown"><![CDATA[## 本地人像修复
-
-修图模式新增「人像」工具，全部在本机完成，不上传、不花钱：
-
-- 磨皮：只提亮皮肤上的暗斑和毛孔阴影，保留纹理；按这张脸自己的肤色定范围，头发、红墙、红衣服不受影响
-- 黑眼圈、亮眼、牙齿美白
-- 瘦脸、大眼：按五官位置轻微变形，嘴和鼻子不会被挤歪
-- 合影默认作用于所有人脸；在大图上点某张脸可以单独调整
-- 数值可以存进预设，「风格和人像套用到全部已选」会一起同步
-]]></description>
-            <enclosure url="https://github.com/fulisadawang/aiphoto/releases/download/v0.7.0/AIPhoto-0.7.0.zip" length="5507984" type="application/octet-stream" sparkle:edSignature="4B2+3PGvFLeDsVxcue4Tv/PWhJslBUUal3gh/VcSg4XTG+bWuD0YoNgbfcO0E6J9Hw0fohFQAZALdRy2FYpSAw=="/>
         </item>
     </channel>
 </rss>
