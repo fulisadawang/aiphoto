@@ -23,10 +23,16 @@ final class AppModel {
     var groups: [PhotoGroup] = []
     var selectedGroupID: Int?
     var selectedPhotoID: String? {
-        didSet { if selectedPhotoID != oldValue { portraitFace = nil } }
+        didSet {
+            guard selectedPhotoID != oldValue else { return }
+            portraitFace = nil
+            chatModelOverride = nil
+        }
     }
     /// 人像工具里单独调整的脸（LocalAnalysis.faces 下标）；nil 表示调整全部人脸
     var portraitFace: Int?
+    /// 对话面板里临时换的模型，只对当前照片这次对话有效，换照片或重开 App 恢复设置里的模型
+    var chatModelOverride: String?
     /// 正在补测人脸关键点的照片
     var shapingPhotoIDs: Set<String> = []
     var filter: Filter = .all
@@ -91,6 +97,8 @@ final class AppModel {
         var prompt: String? = nil
         /// 来自对话改图：结果回写到对话里，不进初修记录
         var fromChat = false
+        /// 对话里对应的结果卡片
+        var chatMessageID: UUID? = nil
         var isRunning = false
     }
 
@@ -323,13 +331,14 @@ final class AppModel {
 
     func runAI(all: Bool) {
         Task {
-            guard let client = await makeVisionClient(purpose: .culling) else { return }
+            guard let client = await makeVisionClient(use: .culling, purpose: .culling) else { return }
             perform("AI 选片中…") { try await self.rankWithAI(client: client, all: all) }
         }
     }
 
     /// 看图模型客户端，AI 选片和定位干扰物共用；配置有问题时弹提示并返回 nil
-    private func makeVisionClient(model: String = AppSettings.model, purpose: AIPurpose) async -> VisionChatClient? {
+    private func makeVisionClient(use: AIUse, model: String? = nil, purpose: AIPurpose) async -> VisionChatClient? {
+        let model = model ?? ModelCatalog.model(for: use)
         let text = AppSettings.baseURL.trimmingCharacters(in: .whitespaces)
         guard let baseURL = URL(string: text), baseURL.scheme?.hasPrefix("http") == true else {
             alert = AlertInfo(title: "选片模型地址无效", message: "请在「小宇专属 › 设置…」里检查接口地址：\(text)")
@@ -340,7 +349,8 @@ final class AppModel {
                 baseURL: baseURL,
                 apiKey: try await KeychainStore.loadIfSaved(account: AppSettings.keychainAccount) ?? "",
                 model: model,
-                purpose: purpose
+                purpose: purpose,
+                fallbackModel: ModelCatalog.fallback(for: use, current: model)
             )
         } catch {
             alert = AlertInfo(title: "读取 API 密钥失败", message: error.localizedDescription)
@@ -729,7 +739,7 @@ final class AppModel {
     func removeDistractions() {
         guard let id = selectedPhotoID else { return }
         Task {
-            guard let client = await makeVisionClient(purpose: .locate) else { return }
+            guard let client = await makeVisionClient(use: .locate, purpose: .locate) else { return }
             await locateAndRemove(photoID: id, client: client)
         }
     }
@@ -786,7 +796,7 @@ final class AppModel {
     }
 
     private func runQuickRetouch(_ targets: [Photo], preset: RetouchPreset?, note: String) async {
-        guard let client = await makeVisionClient(purpose: .locate) else { return }
+        guard let client = await makeVisionClient(use: .locate, purpose: .locate) else { return }
         recordUndo(.edit, ids: targets.map(\.id), label: "一键初修")
         for photo in targets { photos[photo.id]?.retouchLog = RetouchLog() }
         retouchProgress = (0, targets.count)
@@ -892,11 +902,18 @@ final class AppModel {
         let name = photos[job.photoID]?.fileName ?? job.photoID
         switch outcome {
         case .success(let patch):
+            // 这一步在后台处理期间被撤销了：结果不再贴上
+            if let messageID = job.chatMessageID, chatStep(job.photoID, messageID)?.undone == true { break }
             // 先读后写：@Observable 属性在写入期间再读取同一属性会触发独占访问冲突而崩溃
             let patches = (photos[job.photoID]?.cleanups ?? []) + [patch]
             recordUndo(.cleanups, ids: [job.photoID], label: job.undoLabel)
             photos[job.photoID]?.cleanups = patches
-            if job.fromChat {
+            if let messageID = job.chatMessageID {
+                updateChatStep(job.photoID, messageID) {
+                    $0.finished += 1
+                    $0.patchIDs.append(patch.id)
+                }
+            } else if job.fromChat {
                 appendChat(job.photoID, ChatMessage(role: .assistant, text: "已完成：\(job.undoLabel)"))
             } else if let item = job.itemName {
                 appendLog(job.photoID) {
@@ -909,6 +926,7 @@ final class AppModel {
             }
         case .failure(let error):
             cleanupFailures.append("\(name)：\(error.localizedDescription)")
+            if let messageID = job.chatMessageID { updateChatStep(job.photoID, messageID) { $0.failed += 1 } }
             if job.fromChat {
                 appendChat(job.photoID, ChatMessage(
                     role: .assistant, text: "\(job.undoLabel)失败：\(error.localizedDescription)", isError: true
@@ -949,7 +967,7 @@ final class AppModel {
         }
 
         var look: LookAdjust?
-        if !note.isEmpty, let client = await makeVisionClient(model: AppSettings.chatModel, purpose: .look) {
+        if !note.isEmpty, let client = await makeVisionClient(use: .look, purpose: .look) {
             // 均匀取最多 4 张代表照片，让模型在已调好的现状上判断幅度
             let sampleIDs = Self.spread(ids.filter { base[$0] != nil }, count: 4)
             let samples = sampleIDs.compactMap { id -> (Photo, EditSettings)? in photos[id].flatMap { p in base[id].map { (p, $0) } } }
@@ -1065,7 +1083,7 @@ final class AppModel {
         chattingPhotoIDs.insert(id)
         Task {
             defer { chattingPhotoIDs.remove(id) }
-            guard let client = await makeVisionClient(model: AppSettings.chatModel, purpose: .chat) else {
+            guard let client = await makeVisionClient(use: .chat, model: chatModelOverride, purpose: .chat) else {
                 appendChat(id, ChatMessage(role: .assistant, text: "看图模型的设置有问题，没有执行。", isError: true))
                 return
             }
@@ -1115,11 +1133,17 @@ final class AppModel {
         _ plan: ChatEditor.Plan, targets: [ChatEditor.Target], missing: [String],
         photoID id: String, instruction: String, imageAspect aspect: CGFloat
     ) {
+        let messageID = UUID()
+        var step = ChatStep(changes: [])
         if !plan.adjust.isEmpty {
             // 在最新的参数上改，期间摄影师手动拖过的滑块不被覆盖
-            let edit = ChatEditor.applying(plan.adjust, to: photos[id]?.edit ?? .neutral)
+            let before = photos[id]?.edit
+            let edit = ChatEditor.applying(plan.adjust, to: before ?? .neutral)
             recordUndo(.edit, ids: [id], label: "对话改图：\(instruction.prefix(10))")
             photos[id]?.edit = edit == .neutral ? nil : edit
+            step.editBefore = before
+            step.changedEdit = true
+            step.changes = ChatEditor.changes(from: before ?? .neutral, to: edit)
         }
         let pixelSize = photos[id].flatMap { ImageLoader.orientedPixelSize(at: $0.editURL) }
         var skipped: [String] = []
@@ -1138,11 +1162,15 @@ final class AppModel {
                 itemName: target.name,
                 isLarge: false,
                 prompt: target.prompt.map(ChatEditor.redrawPrompt),
-                fromChat: true
+                fromChat: true,
+                chatMessageID: messageID
             ))
+            step.jobs += 1
+            step.changes.append((target.prompt == nil ? "去掉：" : "重画：") + target.name)
         }
         pumpCleanupQueue()
-        appendChat(id, ChatMessage(role: .assistant, text: plan.reply))
+        let hasStep = step.changedEdit || step.jobs > 0
+        appendChat(id, ChatMessage(id: messageID, role: .assistant, text: plan.reply, step: hasStep ? step : nil))
         if !missing.isEmpty {
             appendChat(id, ChatMessage(
                 role: .assistant,
@@ -1157,6 +1185,37 @@ final class AppModel {
                 isError: true
             ))
         }
+    }
+
+    private func chatStep(_ photoID: String, _ messageID: UUID) -> ChatStep? {
+        photos[photoID]?.chat?.first { $0.id == messageID }?.step
+    }
+
+    private func updateChatStep(_ photoID: String, _ messageID: UUID, _ change: (inout ChatStep) -> Void) {
+        guard var messages = photos[photoID]?.chat, let index = messages.firstIndex(where: { $0.id == messageID }),
+              var step = messages[index].step else { return }
+        change(&step)
+        messages[index].step = step
+        photos[photoID]?.chat = messages
+    }
+
+    /// 撤销对话里最新的一步：恢复调色、去掉这一步贴上的修补块、取消还没开始的后台任务。
+    /// 正在处理的任务完成后看到这一步已撤销，结果不再贴上
+    func undoChatStep(_ messageID: UUID) {
+        guard let id = selectedPhotoID, let step = chatStep(id, messageID), !step.undone else { return }
+        cleanupJobs.removeAll { $0.chatMessageID == messageID && !$0.isRunning }
+        if step.changedEdit {
+            recordUndo(.edit, ids: [id], label: "撤销对话这步的调色")
+            let before = step.editBefore
+            photos[id]?.edit = before == .neutral ? nil : before
+        }
+        if !step.patchIDs.isEmpty, let patches = photos[id]?.cleanups {
+            recordUndo(.cleanups, ids: [id], label: "撤销对话这步的修补")
+            let kept = patches.filter { !step.patchIDs.contains($0.id) }
+            photos[id]?.cleanups = kept.isEmpty ? nil : kept
+        }
+        updateChatStep(id, messageID) { $0.undone = true }
+        scheduleSave()
     }
 
     private func appendChat(_ photoID: String, _ message: ChatMessage) {

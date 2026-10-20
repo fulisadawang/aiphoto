@@ -31,7 +31,7 @@ App 显示名为「小宇专属」（2026-10-20 用户改名，`CFBundleDisplayN
   - `CleanupEngine` + `InpaintService` 去杂物（也用于对话改图的重画，传入指令）；`DistractionLocator` 让看图模型框出干扰物并转成画笔笔触；`PhotoRenderer` 合成修补块、套用修图、导出 JPG
   - `ViewingAids` 直方图、合焦高亮、过曝欠曝提示、拍摄参数；`AFPointReader` 解析佳能 MakerNote 的 AFInfo2 读相机对焦点
   - `XMPWriter` 星级写回；`SessionStore` 选片记录；`KeychainStore` 密钥；`ImageLoader` 读图与缓存
-- `AIPhoto/Views/`：SwiftUI 界面。侧栏分组 `GroupSidebar`、大图 `PhotoViewer`（基于 `ZoomableImage`：放大平移、修复前后对比分割线、导航图）、胶片条 `Filmstrip`、右侧 `InspectorView`（顶部切换选片 / 修图：选片模式 `CullingInspector` 只放判断用的信息；修图模式 `EditingInspector` 用竖向工具栏切换 `EditTool`：调色 `EditSection`、人像 `PortraitSection`、去杂物 `CleanupSection`、合成、对话改图 `ChatPanel`、初修记录；模式和工具存在 `AppModel.inspectorMode` / `editTool` 并记在 UserDefaults；以及 `ShootingInfoSection`、`CleanupSection`、`EditSection`、`RetouchLogSection`）、一键初修 `RetouchViews`、`SettingsView`。
+- `AIPhoto/Views/`：SwiftUI 界面。侧栏分组 `GroupSidebar`、大图 `PhotoViewer`（基于 `ZoomableImage`：放大平移、修复前后对比分割线、导航图）、胶片条 `Filmstrip`、右侧 `InspectorView`（顶部切换选片 / 修图：选片模式 `CullingInspector` 只放判断用的信息；修图模式 `EditingInspector` 用竖向工具栏切换 `EditTool`：调色 `EditSection`、人像 `PortraitSection`、去杂物 `CleanupSection`、对话改图 `ChatPanel`、合成、对话改图 `ChatPanel`、初修记录；模式和工具存在 `AppModel.inspectorMode` / `editTool` 并记在 UserDefaults；以及 `ShootingInfoSection`、`CleanupSection`、`EditSection`、`RetouchLogSection`）、一键初修 `RetouchViews`、`SettingsView`（AI 服务页在 `AIServiceSettings`：新手区状态 + 档位，高级设置收起）。
 - 需求与验收标准见 `docs/需求清单.md`，新功能先在那里确认再开发。
 
 ## 外部模型服务（用户已定，不要改动方向）
@@ -73,6 +73,8 @@ App 显示名为「小宇专属」（2026-10-20 用户改名，`CFBundleDisplayN
 - **高光保护要看最亮通道**：`maxExposureKeepingHighlights` 原来按亮度算，饱和红墙红色通道先到顶而亮度不高，实拍红墙溢出从 0.9% 涨到 12%。现在按 RGB 最大通道算。
 - **多图合成**：结果存成 `CleanupPatch`，复用去杂物的叠加、撤销和对比。连拍对齐必须做主体周围的局部配准并按透视变换贴回：只做整体配准时被远处树枝主导，视差让近处窗框错开出现半透明双影。连拍换人要连带盖住原来的人（`coverMask` / `expandedMask`），否则姿势不同会出现重影。合成进行中 `ContentView` 的快捷键全部让出，Esc 取消。
 - **人像修复**（`PortraitRetoucher`）：关键点存在 `FaceInfo.shape`，旧记录打开人像工具或导出时用 `AppModel.withFaceShapes` 补测。先做皮肤、黑眼圈、亮眼、牙齿，最后才做瘦脸大眼的变形，否则关键点对不上。内核用 CIKL 字符串写（已弃用但 macOS 15 可用），本机没装 Metal 工具链。瘦脸不能用 Gustafsson 原式（位移远小于半径时近乎整体平移，半径处撕裂），改用 (1-(d/r)²)² 衰减，控制点取轮廓 12%～32% 处，避开嘴角。亮眼只提亮，加对比和锐化会让眼睛像描了黑边。合影单独调整按 `LocalAnalysis.faces` 下标存在 `EditSettings.faceOverrides`。
+- **模型按用途选**（`AIModels.swift`）：`AIUse` 五种用途（选片 / 找杂物 / 对话改图 / 理解修图描述 / 画图）各自存一个模型名，选片、对话改图、画图沿用旧 key；候选和推荐在 `ModelCatalog.options`，除 Gemini 3.8 Flash 和 gpt-image-2 外都还没实测（标「未测试」）。新增 AI 调用用 `makeVisionClient(use:)` 取模型，出错自动换推荐模型由 `VisionChatClient.fallbackModel` / 图片接口重试完成，用量里 `UsageEntry.fallback` 标出。画图默认和看图共用连接（`InpaintService.separateKey`）。对话面板里换的模型存在 `AppModel.chatModelOverride`，换照片清空。
+- **对话结果卡片**：AI 回复带 `ChatStep`（改动说明、调色前参数、后台任务数、生成的修补块 id），后台任务用 `chatMessageID` 回写到卡片；「撤销这步」只在最新一张卡片上，撤销后正在跑的任务结果不再贴上。
 - **AI 请求必须带 `MagpieUsage.userAgent`**：Magpie 按 User-Agent 区分调用方，用量统计靠它；新增 AI 调用时要传 `AIPurpose`，否则统计里没有这一项。
 - **右侧面板自动切换**：入口要用 `AppModel.showTool(_:)` 切到修图模式的对应工具；画笔只属于去杂物工具，离开该工具或切回选片模式会自动关闭画笔。新增修图工具时加到 `EditTool`。
 - **钥匙串会卡界面**：临时签名每次重新编译都会变，读钥匙串时 macOS 弹授权框，同步读取会把主线程卡住。现在只在设置里保存过密钥时才读（`KeychainStore.isSaved` 记在 UserDefaults），并在后台读（`loadIfSaved`）。Magpie 不需要密钥，不会触发读取。

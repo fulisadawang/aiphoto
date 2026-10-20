@@ -11,11 +11,9 @@ enum AppSettings {
     static let gapKey = "burstMaxGap"
     static let distanceKey = "burstMaxDistance"
 
-    /// 不用 auto-auto：实测它会被路由到 Claude（claude-sonnet-4-6），用户明确不用 Claude 选片
-    static let defaultModel = "group/auto-gemini-3-8-flash"
     static let usdToCnyKey = "usdToCny"
-    /// 对话改图要框出物体位置。实拍对比：auto-auto 路由到的模型 3 次都把小狗框到旁边的木门上，Gemini 3 次都框准
-    static let defaultChatModel = "group/auto-gemini-3-8-flash"
+    /// 选的模型出错时自动换成推荐模型重试一次
+    static let autoFallbackKey = "aiAutoFallback"
     static let defaultBaseURL = "http://127.0.0.1:3425/v1"
 
     static func registerDefaults() {
@@ -24,9 +22,10 @@ enum AppSettings {
             UserDefaults.standard.removeObject(forKey: modelKey)
         }
         UserDefaults.standard.register(defaults: [
-            modelKey: defaultModel,
+            modelKey: ModelCatalog.recommended(for: .culling),
             usdToCnyKey: 7.2,
-            chatModelKey: defaultChatModel,
+            autoFallbackKey: true,
+            chatModelKey: ModelCatalog.recommended(for: .chat),
             baseURLKey: defaultBaseURL,
             perGroupKey: 6,
             blurKey: 40.0,
@@ -35,12 +34,11 @@ enum AppSettings {
         ])
     }
 
-    static var model: String { UserDefaults.standard.string(forKey: modelKey) ?? defaultModel }
     /// 用量统计把 Magpie 的美元折算价换成人民币
     static var usdToCny: Double { UserDefaults.standard.double(forKey: usdToCnyKey) }
-    static var chatModel: String { UserDefaults.standard.string(forKey: chatModelKey) ?? defaultChatModel }
     static var baseURL: String { UserDefaults.standard.string(forKey: baseURLKey) ?? defaultBaseURL }
     static var perGroup: Int { UserDefaults.standard.integer(forKey: perGroupKey) }
+    static var autoFallback: Bool { UserDefaults.standard.bool(forKey: autoFallbackKey) }
 
     static var cullingParams: Culling.Params {
         let defaults = UserDefaults.standard

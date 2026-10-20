@@ -13,6 +13,26 @@ struct ChatMessage: Codable, Identifiable, Equatable {
     var date = Date()
     /// 执行失败的说明，界面上标红
     var isError = false
+    /// 这一步实际做了什么，界面上显示成结果卡片；旧记录和普通回复没有
+    var step: ChatStep?
+}
+
+/// 对话里的一步修改：用于结果卡片的说明和「撤销这步」
+struct ChatStep: Codable, Equatable {
+    /// 具体改动，如「曝光 +0.30 EV」「去掉：右侧路人」
+    var changes: [String]
+    /// 调色前的参数；没调色为 nil
+    var editBefore: EditSettings?
+    var changedEdit = false
+    /// 交给后台去除 / 重画的数量，以及已完成、失败的数量
+    var jobs = 0
+    var finished = 0
+    var failed = 0
+    /// 后台完成后生成的修补块，撤销这步时一并去掉
+    var patchIDs: [UUID] = []
+    var undone = false
+
+    var pending: Int { max(0, jobs - finished - failed) }
 }
 
 /// 对话改图：把摄影师的一句话交给看图模型，换算成调色参数、要去掉的物体和要重画的区域
@@ -81,6 +101,24 @@ struct ChatEditor {
         } catch let error where error is PlanError || error is VisionChatClient.ClientError {
             return try Self.parse(try await client.json(system: Self.systemPrompt, content: content))
         }
+    }
+
+    /// 结果卡片上的调色说明：只列有变化的参数，写变化量
+    static func changes(from before: EditSettings, to after: EditSettings) -> [String] {
+        var lines: [String] = []
+        func add(_ name: String, _ a: Double, _ b: Double, _ format: String, scale: Double = 1) {
+            let delta = (b - a) * scale
+            if abs(delta) >= 0.005 * scale { lines.append(name + " " + String(format: format, delta)) }
+        }
+        add("曝光", before.exposure, after.exposure, "%+.2f EV")
+        add("色温", before.temperature, after.temperature, "%+.0fK")
+        add("色调", before.tint, after.tint, "%+.0f")
+        add("高光", before.highlights, after.highlights, "%+.2f")
+        add("阴影", before.shadows, after.shadows, "%+.2f")
+        add("对比度", before.contrast, after.contrast, "%+.2f")
+        add("自然饱和度", before.vibrance, after.vibrance, "%+.2f")
+        add("磨皮", before.skinSmoothing, after.skinSmoothing, "%+.0f", scale: 100)
+        return lines
     }
 
     static func describe(_ edit: EditSettings) -> String {

@@ -28,6 +28,8 @@ struct UsageEntry: Codable, Equatable {
     var responseID: String?
     var requestedModel: String
     var ok: Bool
+    /// 选的模型出错后自动换成推荐模型重试的请求；旧记录没有该字段
+    var fallback: Bool?
 }
 
 /// 用量日志：一行一条 JSON，存在 Application Support/AIPhoto/usage.jsonl
@@ -49,12 +51,12 @@ final class UsageLog: @unchecked Sendable {
         lock.unlock()
     }
 
-    func record(purpose: AIPurpose, start: Date, responseID: String?, requestedModel: String, ok: Bool) {
+    func record(purpose: AIPurpose, start: Date, responseID: String?, requestedModel: String, ok: Bool, fallback: Bool = false) {
         lock.lock()
         defer { lock.unlock() }
         let entry = UsageEntry(
             start: start, end: Date(), purpose: purpose, shoot: currentShoot,
-            responseID: responseID, requestedModel: requestedModel, ok: ok
+            responseID: responseID, requestedModel: requestedModel, ok: ok, fallback: fallback ? true : nil
         )
         let encoder = JSONEncoder()
         encoder.dateEncodingStrategy = .iso8601
@@ -161,6 +163,8 @@ struct UsageReport {
         let id: String
         var calls = 0
         var failures = 0
+        /// 选的模型出错后自动换成推荐模型的次数
+        var fallbacks = 0
         var inputTokens = 0
         var outputTokens = 0
         /// 美元；未能计价的请求不计入
@@ -204,6 +208,7 @@ struct UsageReport {
             func add(_ line: inout Line) {
                 line.calls += 1
                 if !entry.ok { line.failures += 1 }
+                if entry.fallback == true { line.fallbacks += 1 }
                 line.inputTokens += row?.in ?? 0
                 line.outputTokens += row?.out ?? 0
                 if let cost = row?.cost, row?.priced != false { line.cost += cost } else { line.unpriced += 1 }

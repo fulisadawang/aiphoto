@@ -101,11 +101,18 @@ struct UsageView: View {
 
     // MARK: - 概览
 
+    static func callDetail(_ line: UsageReport.Line) -> String {
+        var parts: [String] = []
+        if line.failures > 0 { parts.append("失败 \(line.failures) 次") }
+        if line.fallbacks > 0 { parts.append("自动换模型 \(line.fallbacks) 次") }
+        return parts.isEmpty ? "全部成功" : parts.joined(separator: " · ")
+    }
+
     private func stats(_ report: UsageReport) -> some View {
         let total = report.total
         return HStack(spacing: 12) {
             StatCard(title: "折算花费", value: Self.yuan(total.cost), detail: total.unpriced > 0 ? "\(total.unpriced) 次未计价" : nil, tint: .accentColor, prominent: true)
-            StatCard(title: "调用次数", value: "\(total.calls)", detail: total.failures > 0 ? "失败 \(total.failures) 次" : "全部成功", tint: total.failures > 0 ? .orange : .green)
+            StatCard(title: "调用次数", value: "\(total.calls)", detail: Self.callDetail(total), tint: total.failures > 0 ? .orange : .green)
             StatCard(title: "平均每次", value: total.calls > 0 ? Self.yuan(total.cost / Double(total.calls)) : "—", detail: nil, tint: .secondary)
             StatCard(title: "Token", value: Self.tokens(total.inputTokens + total.outputTokens), detail: "输入 \(Self.tokens(total.inputTokens)) · 输出 \(Self.tokens(total.outputTokens))", tint: .secondary)
         }

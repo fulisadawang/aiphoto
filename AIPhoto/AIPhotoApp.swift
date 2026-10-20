@@ -35,6 +35,7 @@ struct AIPhotoApp: App {
     init() {
         AppSettings.registerDefaults()
         InpaintService.registerDefaults()
+        ModelCatalog.registerDefaults()
         updaterController = SPUStandardUpdaterController(startingUpdater: true, updaterDelegate: nil, userDriverDelegate: nil)
     }
 

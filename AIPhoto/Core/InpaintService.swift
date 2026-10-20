@@ -20,9 +20,18 @@ enum InpaintService: String, CaseIterable, Identifiable {
     static let baseURLKey = "inpaintBaseURL"
     static let modelKey = "inpaintModel"
     static let keychainAccount = "inpaint-api-key"
+    /// 画图是否单独设置连接；不单独设置时和看图的 AI 共用地址与密钥
+    static let separateKey = "inpaintSeparate"
 
     static func registerDefaults() {
+        let defaults = UserDefaults.standard
+        // 旧版本单独填过、且和看图地址不同的，升级后保持「单独设置」
+        if defaults.object(forKey: separateKey) == nil, let old = defaults.string(forKey: baseURLKey),
+           old.trimmingCharacters(in: .whitespaces) != AppSettings.baseURL.trimmingCharacters(in: .whitespaces) {
+            defaults.set(true, forKey: separateKey)
+        }
         UserDefaults.standard.register(defaults: [
+            separateKey: false,
             serviceKey: InpaintService.openAICompatible.rawValue,
             baseURLKey: "http://127.0.0.1:3425/v1",
             modelKey: "",
@@ -51,14 +60,15 @@ enum InpaintService: String, CaseIterable, Identifiable {
             throw ConfigError.notConfigured
         case .openAICompatible:
             let defaults = UserDefaults.standard
-            let text = (defaults.string(forKey: baseURLKey) ?? "").trimmingCharacters(in: .whitespaces)
+            let separate = defaults.bool(forKey: separateKey)
+            let text = (separate ? defaults.string(forKey: baseURLKey) ?? "" : AppSettings.baseURL).trimmingCharacters(in: .whitespaces)
             guard let baseURL = URL(string: text), baseURL.scheme?.hasPrefix("http") == true else {
                 throw ConfigError.invalidBaseURL(text)
             }
-            let model = (defaults.string(forKey: modelKey) ?? "").trimmingCharacters(in: .whitespaces)
+            let model = ModelCatalog.model(for: .image)
             return OpenAICompatibleInpainter(
                 baseURL: baseURL,
-                apiKey: try await KeychainStore.loadIfSaved(account: keychainAccount) ?? "",
+                apiKey: try await KeychainStore.loadIfSaved(account: separate ? keychainAccount : AppSettings.keychainAccount) ?? "",
                 model: model.isEmpty ? nil : model,
                 purpose: purpose
             )
@@ -95,9 +105,22 @@ struct OpenAICompatibleInpainter: InpaintProvider {
     }
 
     func inpaint(image: CGImage, mask: CGImage, prompt: String?) async throws -> CGImage {
+        do {
+            return try await send(model: model, image: image, mask: mask, prompt: prompt, fallback: false)
+        } catch {
+            // 自定义的图片模型出错时，改用服务默认的图片模型（推荐）重试一次
+            guard model != nil, AppSettings.autoFallback, error is URLError || error is InpaintError else { throw error }
+            if case .encode = error as? InpaintError { throw error }
+            return try await send(model: nil, image: image, mask: mask, prompt: prompt, fallback: true)
+        }
+    }
+
+    private func send(model: String?, image: CGImage, mask: CGImage, prompt: String?, fallback: Bool) async throws -> CGImage {
         let start = Date()
         var ok = false
-        defer { UsageLog.shared.record(purpose: purpose, start: start, responseID: nil, requestedModel: model ?? "", ok: ok) }
+        defer {
+            UsageLog.shared.record(purpose: purpose, start: start, responseID: nil, requestedModel: model ?? "", ok: ok, fallback: fallback)
+        }
         guard let imageData = CleanupEngine.pngData(image),
               let maskImage = Self.transparentMask(from: mask),
               let maskData = CleanupEngine.pngData(maskImage)

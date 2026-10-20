@@ -1,97 +1,172 @@
 import SwiftUI
 
-/// 对话改图：多轮对话，作用于当前照片
+/// 对话改图：多轮对话，作用于当前照片。AI 的修改显示成结果卡片，最新一步可以单独撤销
 struct ChatPanel: View {
     @Environment(AppModel.self) private var model
     let photo: Photo
     @State private var draft = ""
+    @State private var customModel = ""
+    @State private var showCustomModel = false
     @FocusState private var inputFocused: Bool
+
+    private static let suggestions = ["再亮一点", "暖一点", "天空蓝一点", "去掉路人"]
 
     private var messages: [ChatMessage] { photo.chat ?? [] }
     private var isThinking: Bool { model.chattingPhotoIDs.contains(photo.id) }
-    private var pendingJobs: Int { model.cleanupJobs.filter { $0.photoID == photo.id && $0.fromChat }.count }
+    /// 只有最新一张结果卡片能撤销，与 ⌘Z 一步步往回撤一致
+    private var latestStepID: UUID? { messages.last { $0.step != nil }?.id }
+    private var currentModel: String { model.chatModelOverride ?? ModelCatalog.model(for: .chat) }
 
     var body: some View {
         VStack(spacing: 0) {
-            Label("对话改图", systemImage: "bubble.left.and.text.bubble.right")
-                .font(.headline)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding([.horizontal, .top], 12)
-            Text(photo.fileName)
-                .font(.caption)
-                .foregroundStyle(.secondary)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(.horizontal, 12)
-                .padding(.bottom, 8)
+            header
             Divider()
-
             ScrollViewReader { proxy in
                 ScrollView {
-                    LazyVStack(alignment: .leading, spacing: 8) {
+                    LazyVStack(alignment: .leading, spacing: 10) {
                         if messages.isEmpty { hint }
-                        ForEach(messages) { bubble($0).id($0.id) }
+                        ForEach(messages) { message($0).id($0.id) }
                         if isThinking {
                             statusRow("正在理解你的意思…")
-                        }
-                        if pendingJobs > 0 {
-                            statusRow("后台处理中 \(pendingJobs) 处，可以继续说或看别的照片")
                         }
                         Color.clear.frame(height: 1).id("bottom")
                     }
                     .padding(12)
                 }
-                .onChange(of: messages.count) { _, _ in
+                .onChange(of: messages) { _, _ in
                     withAnimation { proxy.scrollTo("bottom") }
                 }
                 .onAppear { proxy.scrollTo("bottom") }
             }
-
             Divider()
-            HStack(alignment: .bottom, spacing: 8) {
-                TextField("说说要怎么改，回车发送", text: $draft, axis: .vertical)
-                    .lineLimit(1...4)
-                    .textFieldStyle(.roundedBorder)
-                    .focused($inputFocused)
-                    .onSubmit(send)
-                Button(action: send) { Image(systemName: "arrow.up.circle.fill").font(.title2) }
-                    .buttonStyle(.borderless)
-                    .disabled(isThinking || draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-                    .help("发送")
-            }
-            .padding(12)
+            footer
         }
         .onAppear { inputFocused = true }
     }
 
+    // MARK: - 顶部
+
+    private var header: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Label("对话改图", systemImage: "bubble.left.and.text.bubble.right")
+                .font(.headline)
+            Text(photo.fileName)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            modelMenu
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(12)
+    }
+
+    /// 在这里换的模型只对这次对话有效，换照片或重开 App 恢复设置里的模型
+    private var modelMenu: some View {
+        Menu {
+            ForEach(ModelCatalog.options(for: .chat)) { option in
+                Button {
+                    model.chatModelOverride = option.id == ModelCatalog.model(for: .chat) ? nil : option.id
+                } label: {
+                    if option.id == currentModel { Image(systemName: "checkmark") }
+                    Text(option.name + "（" + option.note + "）")
+                }
+            }
+            Divider()
+            Button("其他模型…") {
+                customModel = ""
+                showCustomModel = true
+            }
+            if model.chatModelOverride != nil {
+                Button("恢复设置里的模型") { model.chatModelOverride = nil }
+            }
+        } label: {
+            HStack(spacing: 4) {
+                Image(systemName: "sparkles")
+                Text(ModelCatalog.displayName(currentModel, use: .chat))
+                if currentModel == ModelCatalog.recommended(for: .chat) {
+                    Text("推荐").modifier(TagStyle())
+                } else if model.chatModelOverride != nil {
+                    Text("仅本次").modifier(TagStyle(tint: .orange))
+                }
+            }
+            .font(.caption)
+        }
+        .menuStyle(.button)
+        .buttonStyle(.bordered)
+        .controlSize(.small)
+        .fixedSize()
+        .help("换一个模型来理解你的话，只对这次对话有效")
+        .popover(isPresented: $showCustomModel, arrowEdge: .bottom) {
+            VStack(alignment: .leading, spacing: 8) {
+                Text("这次对话用的模型").font(.headline)
+                TextField("能看图的模型名", text: $customModel)
+                    .frame(width: 240)
+                    .onSubmit(useCustomModel)
+                HStack {
+                    Spacer()
+                    Button("取消") { showCustomModel = false }
+                    Button("使用", action: useCustomModel)
+                        .keyboardShortcut(.defaultAction)
+                        .disabled(customModel.trimmingCharacters(in: .whitespaces).isEmpty)
+                }
+            }
+            .padding(14)
+        }
+    }
+
+    private func useCustomModel() {
+        let name = customModel.trimmingCharacters(in: .whitespaces)
+        guard !name.isEmpty else { return }
+        model.chatModelOverride = name
+        showCustomModel = false
+    }
+
+    // MARK: - 消息
+
     private var hint: some View {
         VStack(alignment: .leading, spacing: 6) {
-            Text("对这张照片说一句话，AI 会帮你改，可以接着说继续调整。").foregroundStyle(.secondary)
-            ForEach(["亮一点，暖一点", "把右边的路人去掉", "天空蓝一点", "脸瘦一点，自然些"], id: \.self) { example in
-                Button(example) { draft = example; inputFocused = true }
-                    .buttonStyle(.link)
-            }
-            Text("每一步都可以 ⌘Z 撤销；按 \\ 对比修改前后。")
-                .font(.caption)
+            Text("对这张照片说一句话，AI 会帮你改，可以接着说继续调整。")
+                .foregroundStyle(.secondary)
+            Text("比如「亮一点，暖一点」「把右边的路人去掉」「天空蓝一点」。")
                 .foregroundStyle(.tertiary)
         }
         .font(.callout)
     }
 
-    private func bubble(_ message: ChatMessage) -> some View {
-        let isUser = message.role == .user
-        return HStack {
-            if isUser { Spacer(minLength: 30) }
-            Text(message.text)
-                .textSelection(.enabled)
+    @ViewBuilder
+    private func message(_ message: ChatMessage) -> some View {
+        if message.role == .user {
+            HStack {
+                Spacer(minLength: 40)
+                Text(message.text)
+                    .textSelection(.enabled)
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 7)
+                    .foregroundStyle(Color.accentColor)
+                    .background(Color.accentColor.opacity(0.15), in: UnevenRoundedRectangle(
+                        topLeadingRadius: 12, bottomLeadingRadius: 12, bottomTrailingRadius: 4, topTrailingRadius: 12
+                    ))
+            }
+            .font(.callout)
+        } else if let step = message.step {
+            ResultCard(message: message, step: step, isLatest: message.id == latestStepID)
+        } else {
+            HStack {
+                Label {
+                    Text(message.text).textSelection(.enabled)
+                } icon: {
+                    Image(systemName: message.isError ? "exclamationmark.triangle" : "text.bubble")
+                        .foregroundStyle(message.isError ? .orange : .secondary)
+                }
+                .font(.callout)
                 .padding(.horizontal, 10)
-                .padding(.vertical, 6)
+                .padding(.vertical, 7)
                 .background(
-                    isUser ? Color.accentColor.opacity(0.25) : message.isError ? Color.red.opacity(0.18) : Color.secondary.opacity(0.15),
+                    message.isError ? Color.orange.opacity(0.12) : Color.secondary.opacity(0.1),
                     in: RoundedRectangle(cornerRadius: 10)
                 )
-            if !isUser { Spacer(minLength: 30) }
+                Spacer(minLength: 30)
+            }
         }
-        .font(.callout)
     }
 
     private func statusRow(_ text: String) -> some View {
@@ -101,10 +176,162 @@ struct ChatPanel: View {
         }
     }
 
+    // MARK: - 底部
+
+    private var footer: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 6) {
+                    ForEach(Self.suggestions, id: \.self) { text in
+                        Button(text) {
+                            draft = text
+                            inputFocused = true
+                        }
+                        .buttonStyle(.plain)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 3)
+                        .overlay(Capsule().strokeBorder(Color.secondary.opacity(0.35), lineWidth: 0.5))
+                    }
+                }
+            }
+            HStack(alignment: .bottom, spacing: 6) {
+                TextField("说说要怎么改…", text: $draft, axis: .vertical)
+                    .textFieldStyle(.plain)
+                    .lineLimit(1...4)
+                    .focused($inputFocused)
+                    .onSubmit(send)
+                    .padding(.vertical, 5)
+                Button(action: send) {
+                    Image(systemName: "arrow.up.circle.fill").font(.title2)
+                }
+                .buttonStyle(.borderless)
+                .disabled(isThinking || draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                .help("发送（回车）")
+            }
+            .padding(.leading, 10)
+            .padding(.trailing, 4)
+            .padding(.vertical, 2)
+            .background(Color(nsColor: .textBackgroundColor), in: RoundedRectangle(cornerRadius: 10))
+            .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(Color.secondary.opacity(0.3), lineWidth: 0.5))
+            HStack {
+                Text("回车发送")
+                Spacer()
+                Text("⌘Z 撤销 · \\ 对比")
+            }
+            .font(.caption2)
+            .foregroundStyle(.tertiary)
+        }
+        .padding(12)
+    }
+
     private func send() {
         guard !isThinking else { return }
         let text = draft
         draft = ""
         model.sendChat(text)
+    }
+}
+
+/// AI 的一步修改：做了什么、具体改动、后台进度，最新一步可以撤销
+private struct ResultCard: View {
+    @Environment(AppModel.self) private var model
+    let message: ChatMessage
+    let step: ChatStep
+    let isLatest: Bool
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 6) {
+                Image(systemName: symbol).foregroundStyle(tint)
+                Text(title).font(.callout.weight(.medium))
+            }
+            if !message.text.isEmpty {
+                Text(message.text)
+                    .font(.caption)
+                    .textSelection(.enabled)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            if !step.changes.isEmpty {
+                Text(step.changes.joined(separator: " · "))
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            if step.pending > 0, !step.undone {
+                HStack(spacing: 6) {
+                    ProgressView().controlSize(.mini)
+                    Text("后台处理中，约 30 秒一处，可以继续说或看别的照片")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                }
+            }
+            if !step.undone {
+                HStack(spacing: 6) {
+                    if isLatest {
+                        Button {
+                            model.undoChatStep(message.id)
+                        } label: {
+                            Label("撤销这步", systemImage: "arrow.uturn.backward")
+                        }
+                    }
+                    Button {
+                        model.compareMode.toggle()
+                    } label: {
+                        Label(model.compareMode ? "关闭对比" : "对比", systemImage: "rectangle.split.2x1")
+                    }
+                }
+                .controlSize(.small)
+                .padding(.top, 2)
+            }
+        }
+        .padding(10)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color.secondary.opacity(0.08), in: RoundedRectangle(cornerRadius: 10))
+        .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(Color.secondary.opacity(0.2), lineWidth: 0.5))
+        .opacity(step.undone ? 0.55 : 1)
+    }
+
+    private var title: String {
+        if step.undone { return "已撤销" }
+        var parts: [String] = []
+        if step.changedEdit { parts.append("已调色") }
+        if step.jobs > 0 {
+            if step.pending > 0 {
+                parts.append("正在处理 \(step.pending) 处")
+            } else if step.failed > 0 {
+                parts.append("完成 \(step.finished) 处，失败 \(step.failed) 处")
+            } else {
+                parts.append("已完成 \(step.finished) 处")
+            }
+        }
+        return parts.joined(separator: " · ")
+    }
+
+    private var symbol: String {
+        if step.undone { return "arrow.uturn.backward.circle" }
+        if step.pending > 0 { return "hourglass" }
+        if step.failed > 0 { return "exclamationmark.triangle" }
+        return step.jobs > 0 ? "wand.and.stars" : "slider.horizontal.3"
+    }
+
+    private var tint: Color {
+        if step.undone { return .secondary }
+        if step.failed > 0 { return .orange }
+        return step.pending > 0 ? .purple : .green
+    }
+}
+
+private struct TagStyle: ViewModifier {
+    var tint: Color = .accentColor
+
+    func body(content: Content) -> some View {
+        content
+            .font(.system(size: 9, weight: .semibold))
+            .padding(.horizontal, 4)
+            .padding(.vertical, 1)
+            .foregroundStyle(tint)
+            .background(tint.opacity(0.15), in: RoundedRectangle(cornerRadius: 3))
     }
 }

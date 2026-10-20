@@ -7,6 +7,8 @@ struct VisionChatClient {
     var model: String
     /// 用量统计里记到哪一项
     var purpose: AIPurpose
+    /// 选的模型请求失败时换用的模型（推荐模型），nil 表示不重试
+    var fallbackModel: String?
 
     enum ClientError: LocalizedError {
         case http(Int, String)
@@ -26,10 +28,23 @@ struct VisionChatClient {
 
     /// content 为 OpenAI 格式的消息分段（text / image_url），返回模型输出的 JSON 数据
     func json(system: String, content: [[String: Any]]) async throws -> Data {
+        do {
+            return try await send(model: model, system: system, content: content, fallback: false)
+        } catch {
+            // 只在服务报错或连不上时换模型；回复格式不对、被截断属于内容问题，换模型不一定好，照常报错
+            guard let fallbackModel, error is URLError || { if case .http = error as? ClientError { true } else { false } }()
+            else { throw error }
+            return try await send(model: fallbackModel, system: system, content: content, fallback: true)
+        }
+    }
+
+    private func send(model: String, system: String, content: [[String: Any]], fallback: Bool) async throws -> Data {
         let start = Date()
         var responseID: String?
         var ok = false
-        defer { UsageLog.shared.record(purpose: purpose, start: start, responseID: responseID, requestedModel: model, ok: ok) }
+        defer {
+            UsageLog.shared.record(purpose: purpose, start: start, responseID: responseID, requestedModel: model, ok: ok, fallback: fallback)
+        }
         var request = URLRequest(url: baseURL.appendingPathComponent("chat/completions"))
         request.httpMethod = "POST"
         request.timeoutInterval = 300
