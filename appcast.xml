@@ -3,6 +3,25 @@
     <channel>
         <title>AIPhoto</title>
         <item>
+            <title>0.7.0</title>
+            <pubDate>Tue, 20 Oct 2026 16:51:26 +0800</pubDate>
+            <sparkle:version>8</sparkle:version>
+            <sparkle:shortVersionString>0.7.0</sparkle:shortVersionString>
+            <sparkle:minimumSystemVersion>15.0</sparkle:minimumSystemVersion>
+            <sparkle:hardwareRequirements>arm64</sparkle:hardwareRequirements>
+            <description sparkle:format="markdown"><![CDATA[## 本地人像修复
+
+修图模式新增「人像」工具，全部在本机完成，不上传、不花钱：
+
+- 磨皮：只提亮皮肤上的暗斑和毛孔阴影，保留纹理；按这张脸自己的肤色定范围，头发、红墙、红衣服不受影响
+- 黑眼圈、亮眼、牙齿美白
+- 瘦脸、大眼：按五官位置轻微变形，嘴和鼻子不会被挤歪
+- 合影默认作用于所有人脸；在大图上点某张脸可以单独调整
+- 数值可以存进预设，「风格和人像套用到全部已选」会一起同步
+]]></description>
+            <enclosure url="https://github.com/fulisadawang/aiphoto/releases/download/v0.7.0/AIPhoto-0.7.0.zip" length="5507984" type="application/octet-stream" sparkle:edSignature="4B2+3PGvFLeDsVxcue4Tv/PWhJslBUUal3gh/VcSg4XTG+bWuD0YoNgbfcO0E6J9Hw0fohFQAZALdRy2FYpSAw=="/>
+        </item>
+        <item>
             <title>0.6.0</title>
             <pubDate>Tue, 20 Oct 2026 16:31:06 +0800</pubDate>
             <sparkle:version>7</sparkle:version>
@@ -39,25 +58,6 @@
 - 设置页按「选片」「AI 服务」「用量」分页，更清楚
 ]]></description>
             <enclosure url="https://github.com/fulisadawang/aiphoto/releases/download/v0.5.0/AIPhoto-0.5.0.zip" length="5407651" type="application/octet-stream" sparkle:edSignature="h6UBVIfHB5pi/RUuV0CtSVj1loGtYBQRI12+fl4wrP2wgKoK2TYVArzfbKC0cZixawXEJwauz4ETkvm3MdWNDw=="/>
-        </item>
-        <item>
-            <title>0.4.0</title>
-            <pubDate>Tue, 20 Oct 2026 11:46:24 +0800</pubDate>
-            <sparkle:version>5</sparkle:version>
-            <sparkle:shortVersionString>0.4.0</sparkle:shortVersionString>
-            <sparkle:minimumSystemVersion>15.0</sparkle:minimumSystemVersion>
-            <sparkle:hardwareRequirements>arm64</sparkle:hardwareRequirements>
-            <description sparkle:format="markdown"><![CDATA[## v0.4.0
-
-### 多图合成
-- 右侧面板「合成 › 从同一场的其他照片取…」，把另一张照片里的人或东西拿到当前照片
-- 点一下就能选中人、动物或物品，不准的地方用画笔补选或擦除
-- 连拍换人：全家福有人闭眼时，从相邻连拍里点一下这个人，自动对齐替换
-- 其他照片可以拖动、缩放、水平翻转后放好
-- 可选「AI 融合边缘和影子」，让拿过来的东西更自然
-- 合成结果可以撤销，也可以按 \ 对比前后
-]]></description>
-            <enclosure url="https://github.com/fulisadawang/aiphoto/releases/download/v0.4.0/AIPhoto-0.4.0.zip" length="5273806" type="application/octet-stream" sparkle:edSignature="dL2avj4ab18jeaS02RW4DckMFy07C7WGuSK6e0ZcPTUQSEgr603uX11WIAsHVXWYpKHarw05T22kj47U75+HDA=="/>
         </item>
     </channel>
 </rss>
