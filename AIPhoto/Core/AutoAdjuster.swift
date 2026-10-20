@@ -132,13 +132,13 @@ private struct SRGBPixels {
         return (sum.0 / Double(count), sum.1 / Double(count), sum.2 / Double(count))
     }
 
-    /// 在新增死白像素不超过 maxNewlyClipped 的前提下，最多能加多少曝光（EV）。
-    /// 曝光是线性值乘 2^EV，按亮度直方图逐档检查哪些原本没到顶的像素会被推到顶
+    /// 在新增溢出像素不超过 maxNewlyClipped 的前提下，最多能加多少曝光（EV）。
+    /// 曝光是线性值乘 2^EV，按"最亮通道"直方图逐档检查哪些原本没到顶的像素会被推到顶。
+    /// 用最亮通道而不是亮度：饱和的红墙、红衣服是红色通道先到顶，亮度却不高，按亮度算拦不住（实拍红墙溢出从 0.9% 涨到 12%）
     func maxExposureKeepingHighlights(maxNewlyClipped: Double) -> Double {
         var histogram = [Int](repeating: 0, count: 256)
         for index in stride(from: 0, to: bytes.count, by: 4) {
-            let luma = 0.2126 * Double(bytes[index]) + 0.7152 * Double(bytes[index + 1]) + 0.0722 * Double(bytes[index + 2])
-            histogram[min(255, Int(luma))] += 1
+            histogram[Int(max(bytes[index], bytes[index + 1], bytes[index + 2]))] += 1
         }
         let total = Double(width * height), clip = 247
         func newlyClipped(_ ev: Double) -> Double {

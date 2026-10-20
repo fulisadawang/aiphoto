@@ -1,24 +1,38 @@
 import SwiftUI
 
-/// 一键初修开始前：说明会做什么、选一个风格，然后全自动处理
+/// 一键初修开始前：说明会做什么，选预设、写本场诉求，然后全自动处理
 struct RetouchStartSheet: View {
     @Environment(AppModel.self) private var model
     @Environment(\.dismiss) private var dismiss
-    @State private var styleID: UUID?
+    @State private var presetID: UUID?
+    @State private var note = ""
+    /// 在这个窗口上再弹出预设管理；从主界面弹会被当前窗口挡住
+    @State private var showManager = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
             Text("一键初修 \(model.pickedCount) 张已选照片").font(.title3.bold())
             VStack(alignment: .leading, spacing: 6) {
-                Label("自动调色：白平衡、曝光、高光阴影（手动修过的照片保留原调整）", systemImage: "wand.and.stars")
-                Label("皮肤轻度柔化（检测到人脸时）", systemImage: "face.smiling")
-                Label("去掉背景杂物：推车、杂物、电线、路人等；孩子手里的东西不动", systemImage: "eraser")
+                Label("自动调色：每张按自身光线校正白平衡和曝光，再叠加预设和本场诉求", systemImage: "wand.and.stars")
+                Label("去掉背景杂物：推车、杂物、电线、路人等；孩子手里的东西和你要求保留的不动", systemImage: "eraser")
                 Label("完成后给出总结，需要你看一眼的排在最前面", systemImage: "list.bullet.clipboard")
             }
             .foregroundStyle(.secondary)
-            Picker("风格", selection: $styleID) {
-                Text("不套用风格").tag(UUID?.none)
-                ForEach(model.styles) { Text($0.name).tag(Optional($0.id)) }
+            HStack {
+                Picker("预设", selection: $presetID) {
+                    Text("不用预设").tag(UUID?.none)
+                    ForEach(model.presets) { Text($0.name).tag(Optional($0.id)) }
+                }
+                Button("管理…") { showManager = true }
+            }
+            VStack(alignment: .leading, spacing: 4) {
+                Text("本场诉求（可选）").font(.callout)
+                NoteEditor(text: $note)
+                Text(presetID == nil && note.isEmpty
+                     ? "不选预设也不写诉求：自动调色，手动修过的照片保留原调整。"
+                     : "选了预设或写了诉求：全部已选照片按此重新调色（手动修过的也会重做，可 ⌘Z 撤回），去杂物结果保留。")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
             }
             Text("全程在后台进行，可以继续选片。去杂物每张约 30～60 秒。")
                 .font(.caption)
@@ -27,7 +41,7 @@ struct RetouchStartSheet: View {
                 Spacer()
                 Button("取消") { dismiss() }
                 Button("开始初修") {
-                    model.startQuickRetouch(styleID: styleID)
+                    model.startQuickRetouch(presetID: presetID, note: note)
                     dismiss()
                 }
                 .buttonStyle(.borderedProminent)
@@ -35,7 +49,19 @@ struct RetouchStartSheet: View {
             }
         }
         .padding(20)
-        .frame(width: 460)
+        .frame(width: 520)
+        .onAppear { selectPreset(model.defaultPresetID) }
+        .sheet(isPresented: $showManager) { PresetManagerSheet().environment(model) }
+        .onChange(of: presetID) { old, new in
+            // 换预设时，如果诉求还是上一个预设的原文，换成新预设的描述
+            let oldNote = model.presets.first { $0.id == old }?.note ?? ""
+            if note == oldNote { note = model.presets.first { $0.id == new }?.note ?? "" }
+        }
+    }
+
+    private func selectPreset(_ id: UUID?) {
+        presetID = id
+        note = model.presets.first { $0.id == id }?.note ?? ""
     }
 }
 
@@ -58,6 +84,12 @@ struct RetouchSummaryView: View {
                 Button("关闭") { dismiss() }.keyboardShortcut(.cancelAction)
             }
             .padding(16)
+            if let summary = model.lastLookSummary {
+                Label("AI 对本场诉求的理解：\(summary)", systemImage: "text.bubble")
+                    .font(.callout)
+                    .padding(.horizontal, 16)
+                    .padding(.bottom, 10)
+            }
             Divider()
             List {
                 if !review.isEmpty {

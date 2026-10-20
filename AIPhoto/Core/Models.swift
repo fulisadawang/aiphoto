@@ -86,6 +86,8 @@ struct Photo: Identifiable, Codable {
     var retouchLog: RetouchLog?
     /// 对话改图的记录；可选类型以兼容旧的选片记录
     var chat: [ChatMessage]?
+    /// 初修时用的修图要求（预设描述加本场补充），去杂物和对话改图参考
+    var retouchNote: String?
 
     init(id: String) {
         self.id = id

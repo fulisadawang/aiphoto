@@ -13,14 +13,17 @@ struct DistractionLocator {
         let box: CGRect
     }
 
-    /// hints：AI 选片时已发现的干扰物名称，帮助模型聚焦
-    func locate(imageURL: URL, hints: [String]) async throws -> [Item] {
+    /// hints：AI 选片时已发现的干扰物名称，帮助模型聚焦；note：摄影师对本场的要求（如"保留地上的落叶"）
+    func locate(imageURL: URL, hints: [String], note: String? = nil) async throws -> [Item] {
         guard let image = ImageLoader.image(at: imageURL, maxPixel: 1280),
               let jpeg = ImageLoader.jpegData(image, quality: 0.85)
         else { throw AnalyzerError.unreadable(imageURL) }
 
         var text = "请找出这张照片里的干扰物。"
         if !hints.isEmpty { text += "选片时已经注意到：\(hints.joined(separator: "、"))。" }
+        if let note, !note.isEmpty {
+            text += "摄影师对这一场的要求（按要求决定哪些去除、哪些保留，要求保留的一律归为 subject）：\(note)"
+        }
         let content: [[String: Any]] = [
             ["type": "text", "text": text],
             ["type": "image_url", "image_url": ["url": "data:image/jpeg;base64,\(jpeg.base64EncodedString())"]],

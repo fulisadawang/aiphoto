@@ -4,7 +4,7 @@ App 显示名为「小宇专属」（2026-10-20 用户改名，`CFBundleDisplayN
 
 摄影师自用的 Mac 原生选片与修图客户端，场景是亲子 / 家庭纪实拍摄（RAW+JPG 混拍）。仅本人自用：不需要服务器、账号、计费，也不上架。用户使用说明见 `README.md`。
 
-产品定位（2026-10-19 用户决定）：核心是**选片 + 去杂物**，选中的照片交给像素蛋糕精修。**不再以替代像素蛋糕为目标**，不要主动推进人像精修类功能；新需求以用户实际使用中提出的小改进为主。
+产品定位（2026-10-20 更新）：像素蛋糕按张收费，用户希望**尽量少用像素蛋糕**——大部分照片在本 App 里完成选片、初修和常用精修后直接交付，只有实在处理不了的才送像素蛋糕。仍不追求全面替代像素蛋糕；新功能按用户提出、在 `docs/需求清单.md` 确认后开发。
 
 ## 构建与运行
 
@@ -24,6 +24,7 @@ App 显示名为「小宇专属」（2026-10-20 用户改名，`CFBundleDisplayN
 - `AIPhoto/Core/`：不依赖界面的逻辑。
   - `PhotoScanner` 扫描配对 → `LocalAnalyzer` 本地分析（清晰度、人脸、闭眼、人体框、曝光、画面特征）→ `Culling` 分组与评分 → `AIRanker` + `VisionChatClient` AI 选片
   - `EditSettings` 非破坏性修图参数；`AutoAdjuster` 自动白平衡/曝光；`SkinRetoucher` 皮肤柔化；`StylePreset` 风格 LUT 学习与存储
+  - `RetouchPreset` 修图预设（`RetouchPresetStore` 存 `~/Library/Application Support/AIPhoto/presets.json`，默认预设 id 在 UserDefaults）；`LookInterpreter` 把本场诉求换算成整场统一的调色偏移；`ClipGuard` 防止套用后饱和颜色溢出
   - `ChatEditor` 对话改图：把一句话换算成调色参数、要去掉的物体和要重画的区域，并校正位置；
   - `CleanupEngine` + `InpaintService` 去杂物（也用于对话改图的重画，传入指令）；`DistractionLocator` 让看图模型框出干扰物并转成画笔笔触；`PhotoRenderer` 合成修补块、套用修图、导出 JPG
   - `ViewingAids` 直方图、合焦高亮、过曝欠曝提示、拍摄参数；`AFPointReader` 解析佳能 MakerNote 的 AFInfo2 读相机对焦点
@@ -66,6 +67,8 @@ App 显示名为「小宇专属」（2026-10-20 用户改名，`CFBundleDisplayN
 - 单窗口用 `Window` 场景。`WindowGroup` 在用访达或 `open` 打开文件夹时会多开窗口。
 - 不能只靠合成图验证：闭眼检测和竖拍方向问题都是换成真实照片才暴露出来的。
 - 过曝提示要看"三个通道都到顶"（死白），不能用"任一通道到顶"：饱和的红色衣服、红房子会整片误报。
+- **修图预设的调色顺序**：每张先 `AutoAdjuster` 按自身光线自动调色 → 叠加预设（高光、阴影、色调、对比、饱和都是偏移量；预设不含曝光和色温）→ 叠加 `LookAdjust`（AI 对本场诉求的换算，整场只理解一次，保证颜色统一）→ `ClipGuard` 检查新增溢出超过 3% 时把本张的预设和诉求调整减到 50%/25%。描述同时写进 `Photo.retouchNote`，去杂物定位和对话改图都会带上。
+- **高光保护要看最亮通道**：`maxExposureKeepingHighlights` 原来按亮度算，饱和红墙红色通道先到顶而亮度不高，实拍红墙溢出从 0.9% 涨到 12%。现在按 RGB 最大通道算。
 - **钥匙串会卡界面**：临时签名每次重新编译都会变，读钥匙串时 macOS 弹授权框，同步读取会把主线程卡住。现在只在设置里保存过密钥时才读（`KeychainStore.isSaved` 记在 UserDefaults），并在后台读（`loadIfSaved`）。Magpie 不需要密钥，不会触发读取。
 - **对话改图的位置不能直接信模型**：人像修饰对齐本地人脸框，其他物体放大局部再确认（`ChatEditor.resolve`）。重画放大回原尺寸超过 3 倍不执行（`maxRedrawUpscale`），大面积改色走整体调色。
 - 主窗口的快捷键挂在 `ContentView` 上，文本框有焦点时必须让出（`isEditingText`），否则在对话框里打字会触发淘汰、缩放等。

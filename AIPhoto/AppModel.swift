@@ -104,14 +104,27 @@ final class AppModel {
     /// 同时向去杂物服务发出的请求数
     private static let cleanupConcurrency = 2
 
-        /// 个人风格预设列表（全局，与照片文件夹无关）
+    /// 个人风格预设列表（全局，与照片文件夹无关）
     var styles: [StylePreset] = []
+    /// 修图预设（风格、磨皮、调色偏移和给 AI 的描述），全局共用
+    var presets: [RetouchPreset] = []
+    var defaultPresetID: UUID?
+    var showPresetManager = false
+    var showSavePreset = false
+    /// 最近一次 AI 对本场诉求的理解，初修总结里展示
+    var lastLookSummary: String?
 
     init() {
         do {
             styles = try StyleStore.shared.all()
         } catch {
             alert = AlertInfo(title: "读取风格预设失败", message: error.localizedDescription)
+        }
+        do {
+            presets = try RetouchPresetStore.load()
+            defaultPresetID = RetouchPresetStore.defaultID.flatMap { id in presets.contains { $0.id == id } ? id : nil }
+        } catch {
+            alert = AlertInfo(title: "读取修图预设失败", message: error.localizedDescription)
         }
     }
 
@@ -628,12 +641,12 @@ final class AppModel {
     @discardableResult
     private func locateAndRemove(photoID: String, client: VisionChatClient) async -> Bool {
         guard let photo = photos[photoID] else { return false }
-        let url = photo.displayURL, hints = photo.ai?.distractions ?? []
+        let url = photo.displayURL, hints = photo.ai?.distractions ?? [], note = photo.retouchNote
         locatingPhotoIDs.insert(photoID)
         defer { locatingPhotoIDs.remove(photoID) }
         do {
             let locator = DistractionLocator(client: client)
-            async let items = locator.locate(imageURL: url, hints: hints)
+            async let items = locator.locate(imageURL: url, hints: hints, note: note)
             async let size = Task.detached { ImageLoader.orientedPixelSize(at: url) }.value
             let (found, pixelSize) = try await (items, size)
             guard photos[photoID] != nil else { return false }
@@ -663,21 +676,29 @@ final class AppModel {
     }
 
     /// 一键初修：对所有已选照片全自动处理，不需要事先过目；完成后给出总结
-    func startQuickRetouch(styleID: UUID?) {
+    func startQuickRetouch(presetID: UUID?, note: String) {
         let targets = photos.values.filter { $0.decision == .pick }.sorted { $0.id < $1.id }
         guard !targets.isEmpty else {
             alert = AlertInfo(title: "还没有已选照片", message: "先选用照片（P），再做一键初修。")
             return
         }
-        Task { await runQuickRetouch(targets, styleID: styleID) }
+        let preset = presets.first { $0.id == presetID }
+        Task { await runQuickRetouch(targets, preset: preset, note: note.trimmingCharacters(in: .whitespacesAndNewlines)) }
     }
 
-    private func runQuickRetouch(_ targets: [Photo], styleID: UUID?) async {
+    private func runQuickRetouch(_ targets: [Photo], preset: RetouchPreset?, note: String) async {
         guard let client = await makeVisionClient() else { return }
         recordUndo(.edit, ids: targets.map(\.id), label: "一键初修")
         for photo in targets { photos[photo.id]?.retouchLog = RetouchLog() }
         retouchProgress = (0, targets.count)
-        let styleName = styles.first { $0.id == styleID }?.name
+        lastLookSummary = nil
+        // 选了预设或写了诉求：所有照片按预设重新调色（用户确认，手动修过的也重做，可撤销）；否则沿用原来的自动调色
+        let usesPreset = preset != nil || !note.isEmpty
+        if usesPreset {
+            statusText = note.isEmpty ? "按预设调色中…" : "AI 正在理解本场诉求…"
+            await recolor(targets.map(\.id), preset: preset, note: note)
+            statusText = ""
+        }
 
         await withTaskGroup(of: Void.self) { group in
             var next = 0
@@ -685,7 +706,7 @@ final class AppModel {
                 guard next < targets.count else { return }
                 let photo = targets[next]
                 next += 1
-                group.addTask { await self.retouch(photo, styleID: styleID, styleName: styleName, client: client) }
+                group.addTask { await self.retouch(photo, adjustsColor: !usesPreset, client: client) }
             }
             // 每张要调用看图模型定位干扰物，并发 3 个
             for _ in 0..<min(3, targets.count) { enqueue() }
@@ -701,24 +722,19 @@ final class AppModel {
         showRetouchSummary = true
     }
 
-    private func retouch(_ photo: Photo, styleID: UUID?, styleName: String?, client: VisionChatClient) async {
+    /// adjustsColor 为 false 时调色已由 recolor 按预设统一做过，这里只去杂物
+    private func retouch(_ photo: Photo, adjustsColor: Bool, client: VisionChatClient) async {
         // 调色：手动修过的保留，不覆盖摄影师的调整
-        if let existing = photo.edit {
+        if !adjustsColor {
+        } else if photo.edit != nil {
             appendLog(photo.id) { $0.actions.append("已有手动修图，保留原调整") }
-            if let styleID, existing.styleID == nil {
-                var edit = existing
-                edit.styleID = styleID
-                photos[photo.id]?.edit = edit
-                appendLog(photo.id) { $0.actions.append("套用风格「\(styleName ?? "")」") }
-            }
         } else {
             let url = photo.editURL, analysis = photo.analysis
             do {
                 var edit = try await Task.detached { try AutoAdjuster.compute(url: url, analysis: analysis) }.value
                 if analysis?.faces.contains(where: { $0.features != nil }) == true { edit.skinSmoothing = 0.25 }
-                edit.styleID = styleID
                 photos[photo.id]?.edit = edit
-                appendLog(photo.id) { $0.actions.append(contentsOf: Self.describe(edit, styleName: styleName)) }
+                appendLog(photo.id) { $0.actions.append(contentsOf: Self.describe(edit, presetName: nil)) }
             } catch {
                 appendLog(photo.id) { $0.warnings.append("自动调色失败：\(error.localizedDescription)") }
             }
@@ -729,7 +745,7 @@ final class AppModel {
         await locateAndRemove(photoID: photo.id, client: client)
     }
 
-    private static func describe(_ edit: EditSettings, styleName: String?) -> [String] {
+    private static func describe(_ edit: EditSettings, presetName: String?) -> [String] {
         var parts: [String] = []
         if abs(edit.exposure) >= 0.05 { parts.append(String(format: "曝光 %+.2f EV", edit.exposure)) }
         if edit.temperature != 6500 || edit.tint != 0 {
@@ -737,8 +753,8 @@ final class AppModel {
         }
         if edit.highlights < 0 { parts.append("压暗高光") }
         if edit.shadows > 0 { parts.append("提亮阴影") }
-        if edit.skinSmoothing > 0 { parts.append("皮肤轻度柔化") }
-        if let styleName, edit.styleID != nil { parts.append("套用风格「\(styleName)」") }
+        if edit.skinSmoothing > 0 { parts.append(String(format: "皮肤柔化 %.0f%%", edit.skinSmoothing * 100)) }
+        if let presetName { parts.insert("套用预设「\(presetName)」", at: 0) }
         return parts.isEmpty ? ["曝光和白平衡正常，未调整"] : parts
     }
 
@@ -809,6 +825,131 @@ final class AppModel {
         }
     }
 
+    // MARK: - 修图预设
+
+    /// 对一批照片按预设和本场诉求重新调色：每张先按自身光线自动调色，再叠加预设，再叠加整场统一的诉求换算结果。
+    /// 去杂物和合成结果不动。调用方负责记录撤销
+    private func recolor(_ ids: [String], preset: RetouchPreset?, note: String) async {
+        guard let folder = folderURL else { return }
+        var autos: [String: EditSettings] = [:], base: [String: EditSettings] = [:]
+        for id in ids {
+            guard let photo = photos[id] else { continue }
+            let url = photo.editURL, analysis = photo.analysis
+            do {
+                var auto = try await Task.detached { try AutoAdjuster.compute(url: url, analysis: analysis) }.value
+                if preset == nil, analysis?.faces.contains(where: { $0.features != nil }) == true { auto.skinSmoothing = 0.25 }
+                autos[id] = auto
+                base[id] = preset?.applied(to: auto) ?? auto
+            } catch {
+                appendLog(id) { $0.warnings.append("自动调色失败：\(error.localizedDescription)") }
+            }
+        }
+
+        var look: LookAdjust?
+        if !note.isEmpty, let client = await makeVisionClient(model: AppSettings.chatModel) {
+            // 均匀取最多 4 张代表照片，让模型在已调好的现状上判断幅度
+            let sampleIDs = Self.spread(ids.filter { base[$0] != nil }, count: 4)
+            let samples = sampleIDs.compactMap { id -> (Photo, EditSettings)? in photos[id].flatMap { p in base[id].map { (p, $0) } } }
+            do {
+                let images = try await Task.detached {
+                    try samples.map { try Self.preview($0.0, edit: $0.1, folder: folder, maxPixel: 768) }
+                }.value
+                look = try await LookInterpreter(client: client).interpret(note: note, samples: images)
+            } catch {
+                alert = AlertInfo(title: "AI 没能理解本场诉求", message: "已按预设和自动调色处理，诉求里的颜色要求没有生效。\n\n\(error.localizedDescription)")
+            }
+        }
+        lastLookSummary = look?.summary
+
+        for (id, edit) in base {
+            guard let photo = photos[id], let auto = autos[id] else { continue }
+            let target = look?.applied(to: edit) ?? edit
+            let (final, strength) = await Task.detached { Self.limitClipping(photo, auto: auto, target: target, folder: folder) }.value
+            photos[id]?.edit = final
+            photos[id]?.retouchNote = note.isEmpty ? nil : note
+            var actions = Self.describe(final, presetName: preset?.name) + (look.map { ["按本场诉求：\($0.summary)"] } ?? [])
+            if strength < 1 {
+                actions.append(String(format: "为避免饱和颜色溢出，本张的预设和诉求调整减弱到 %.0f%%", strength * 100))
+            }
+            appendLog(id) { $0.actions.append(contentsOf: actions) }
+        }
+        scheduleSave()
+    }
+
+    /// 套用后饱和颜色新增溢出过多时，逐步减弱本张相对自动调色的调整（一半、四分之一）。
+    /// 实拍中红房子特写在偏暖加对比后整片红墙到顶、木板纹理消失
+    private nonisolated static func limitClipping(
+        _ photo: Photo, auto: EditSettings, target: EditSettings, folder: URL
+    ) -> (EditSettings, Double) {
+        guard let reference = try? preview(photo, edit: auto, folder: folder, maxPixel: 512) else { return (target, 1) }
+        let baseline = ClipGuard.clippedFraction(reference)
+        for strength in [1.0, 0.5, 0.25] {
+            let edit = strength == 1 ? target : ClipGuard.blend(from: auto, to: target, strength)
+            guard let image = try? preview(photo, edit: edit, folder: folder, maxPixel: 512) else { return (target, 1) }
+            if ClipGuard.clippedFraction(image) - baseline <= ClipGuard.maxNewlyClipped { return (edit, strength) }
+        }
+        return (ClipGuard.blend(from: auto, to: target, 0.25), 0.25)
+    }
+
+    private static func spread(_ ids: [String], count: Int) -> [String] {
+        guard ids.count > count else { return ids }
+        return (0..<count).map { ids[$0 * (ids.count - 1) / (count - 1)] }
+    }
+
+    /// 单张或整批套用预设：只重做调色，去杂物保留；整批算一步撤销
+    func applyPreset(_ preset: RetouchPreset, to ids: [String]) {
+        guard !ids.isEmpty else { return }
+        perform(preset.note.isEmpty ? "套用预设中…" : "AI 正在按预设描述调色…") {
+            self.recordUndo(.edit, ids: ids, label: "套用预设「\(preset.name)」")
+            await self.recolor(ids, preset: preset, note: preset.note.trimmingCharacters(in: .whitespacesAndNewlines))
+        }
+    }
+
+    var pickedPhotoIDs: [String] { photos.values.filter { $0.decision == .pick }.map(\.id).sorted() }
+
+    /// 把当前照片的修图存为预设：记下它比自动调色多调的部分，曝光和色温不存
+    func saveCurrentAsPreset(name: String, note: String) {
+        guard let photo = selectedPhoto else { return }
+        let edit = photo.edit ?? .neutral, url = photo.editURL, analysis = photo.analysis
+        perform("存为预设中…") {
+            let auto = try await Task.detached { try AutoAdjuster.compute(url: url, analysis: analysis) }.value
+            self.presets.append(RetouchPreset.from(edit: edit, auto: auto, name: name, note: note))
+            try RetouchPresetStore.save(self.presets)
+        }
+    }
+
+    func updatePreset(_ preset: RetouchPreset) {
+        guard let index = presets.firstIndex(where: { $0.id == preset.id }) else { return }
+        presets[index] = preset
+        savePresets()
+    }
+
+    func addPreset() -> RetouchPreset {
+        let preset = RetouchPreset(name: "新预设")
+        presets.append(preset)
+        savePresets()
+        return preset
+    }
+
+    func deletePreset(_ id: UUID) {
+        presets.removeAll { $0.id == id }
+        if defaultPresetID == id { setDefaultPreset(nil) }
+        savePresets()
+    }
+
+    func setDefaultPreset(_ id: UUID?) {
+        defaultPresetID = id
+        RetouchPresetStore.defaultID = id
+    }
+
+    private func savePresets() {
+        do {
+            try RetouchPresetStore.save(presets)
+        } catch {
+            alert = AlertInfo(title: "保存修图预设失败", message: error.localizedDescription)
+        }
+    }
+
     // MARK: - 对话改图
 
     /// 摄影师对当前照片说一句话：调色立即生效，去除和重画进后台队列，完成后回写到对话里
@@ -830,7 +971,7 @@ final class AppModel {
                 let preview = try await Task.detached { try Self.chatPreview(photo, folder: folder) }.value
                 let editor = ChatEditor(client: client)
                 let plan = try await editor.plan(
-                    image: preview, edit: photo.edit ?? .neutral, history: history, instruction: instruction
+                    image: preview, edit: photo.edit ?? .neutral, history: history, instruction: instruction, note: photo.retouchNote
                 )
                 // 去除和重画先校正位置，确认不到的不执行
                 let faces = photo.analysis?.faces.map(\.box) ?? []
@@ -855,9 +996,13 @@ final class AppModel {
 
     /// 给模型看的当前效果：缩小的预览叠上去杂物和调色
     private nonisolated static func chatPreview(_ photo: Photo, folder: URL) throws -> CGImage {
-        guard let image = ImageLoader.image(at: photo.editURL, maxPixel: 1280),
+        try preview(photo, edit: photo.edit, folder: folder, maxPixel: 1280)
+    }
+
+    private nonisolated static func preview(_ photo: Photo, edit: EditSettings?, folder: URL, maxPixel: Int) throws -> CGImage {
+        guard let image = ImageLoader.image(at: photo.editURL, maxPixel: maxPixel),
               let rendered = try PhotoRenderer.render(
-                  image, edit: photo.edit, faces: photo.analysis?.faces ?? [], patches: photo.cleanups ?? [], folder: folder
+                  image, edit: edit, faces: photo.analysis?.faces ?? [], patches: photo.cleanups ?? [], folder: folder
               )
         else { throw AnalyzerError.unreadable(photo.editURL) }
         return rendered

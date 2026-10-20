@@ -19,6 +19,8 @@ struct EditSection: View {
             .buttonStyle(.bordered)
             .disabled(model.isBusy)
 
+            PresetMenu(photo: photo)
+
             Picker("风格", selection: Binding(
                 get: { edit.styleID },
                 set: { id in

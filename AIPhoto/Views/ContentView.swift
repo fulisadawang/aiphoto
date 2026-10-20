@@ -128,6 +128,8 @@ struct ContentView: View {
             }
         }
         .sheet(isPresented: $model.showRetouchStart) { RetouchStartSheet().environment(model) }
+        .sheet(isPresented: $model.showPresetManager) { PresetManagerSheet().environment(model) }
+        .sheet(isPresented: $model.showSavePreset) { SavePresetSheet().environment(model) }
         .sheet(isPresented: $model.showRetouchSummary) { RetouchSummaryView().environment(model) }
         .alert(item: $model.alert) { info in
             Alert(title: Text(info.title), message: Text(info.message))

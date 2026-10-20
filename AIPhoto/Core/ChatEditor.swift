@@ -60,9 +60,11 @@ struct ChatEditor {
     ]
 
     /// image：当前效果（已含去杂物和调色）的缩小图，让模型在现状上理解"再亮一点"这类说法
-    func plan(image: CGImage, edit: EditSettings, history: [ChatMessage], instruction: String) async throws -> Plan {
+    /// note：这张照片初修时摄影师对本场的总体要求，没有为 nil
+    func plan(image: CGImage, edit: EditSettings, history: [ChatMessage], instruction: String, note: String? = nil) async throws -> Plan {
         guard let jpeg = ImageLoader.jpegData(image, quality: 0.85) else { throw CleanupEngine.CleanupError.render }
         var text = "当前修图参数：\(Self.describe(edit))\n"
+        if let note, !note.isEmpty { text += "摄影师对这一场的总体修图要求（作为背景参考，以这次说的话为准）：\(note)\n" }
         let recent = history.suffix(8)
         if !recent.isEmpty {
             text += "之前的对话：\n" + recent.map { ($0.role == .user ? "摄影师：" : "助手：") + $0.text }.joined(separator: "\n") + "\n"
