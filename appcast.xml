@@ -3,6 +3,21 @@
     <channel>
         <title>AIPhoto</title>
         <item>
+            <title>0.8.3</title>
+            <pubDate>Tue, 20 Oct 2026 22:42:14 +0800</pubDate>
+            <sparkle:version>12</sparkle:version>
+            <sparkle:shortVersionString>0.8.3</sparkle:shortVersionString>
+            <sparkle:minimumSystemVersion>15.0</sparkle:minimumSystemVersion>
+            <sparkle:hardwareRequirements>arm64</sparkle:hardwareRequirements>
+            <description sparkle:format="markdown"><![CDATA[## AI 选片可以取消，进度更清楚
+
+- AI 选片时底部状态栏有「取消」按钮，菜单「选片 › 取消 AI 选片」（⌘.）也可以；已评估的结果保留，再点「AI 选片」只处理剩下的组
+- 进度改为显示已评估多少张，并估算大约还要多久
+- 左侧分组列表里，排队中的组显示时钟，正在评估的组显示转圈
+]]></description>
+            <enclosure url="https://github.com/fulisadawang/aiphoto/releases/download/v0.8.3/AIPhoto-0.8.3.zip" length="5682083" type="application/octet-stream" sparkle:edSignature="SknPoA4KCf9ja+5qiCQqqEOO52R3zXo+xvDMwPTIC6nF7PDryPqQKS9xXIaOSu1BhZ8FGh78TWv+MCGZUliFAA=="/>
+        </item>
+        <item>
             <title>0.8.2</title>
             <pubDate>Tue, 20 Oct 2026 22:22:36 +0800</pubDate>
             <sparkle:version>11</sparkle:version>
@@ -32,27 +47,6 @@
 - 这两个档位还没用实拍测过；选的模型出错或回复格式不对时，会自动换回推荐模型再试一次
 ]]></description>
             <enclosure url="https://github.com/fulisadawang/aiphoto/releases/download/v0.8.1/AIPhoto-0.8.1.zip" length="5660224" type="application/octet-stream" sparkle:edSignature="NCJvQl+lrPq8yEzHYc8Pb+FTT+CoKrZEI8sNPh5gj4zicB2U4J9iAiqdzn4oV+ruyNBTE1/Ugc+oUNCib3V8AQ=="/>
-        </item>
-        <item>
-            <title>0.8.0</title>
-            <pubDate>Tue, 20 Oct 2026 19:03:47 +0800</pubDate>
-            <sparkle:version>9</sparkle:version>
-            <sparkle:shortVersionString>0.8.0</sparkle:shortVersionString>
-            <sparkle:minimumSystemVersion>15.0</sparkle:minimumSystemVersion>
-            <sparkle:hardwareRequirements>arm64</sparkle:hardwareRequirements>
-            <description sparkle:format="markdown"><![CDATA[## AI 模型设置改版
-
-- 设置 › AI 服务重新设计：最上面显示 AI 能不能用，连不上时说明怎么办；选一个档位就配好模型（目前只有「推荐」，其他档位实测后开放）
-- 高级设置可分别给 AI 选片、找杂物、对话改图、理解修图描述、画图选模型，也可以自定义
-- 选的模型出错时自动换成推荐模型重试，「用量」里会标出次数
-
-## 对话改图面板改版
-
-- 顶部可以临时换模型，只对这次对话有效
-- AI 的每次修改显示成卡片：改了什么、后台进度一目了然
-- 最新一步可以单独「撤销这步」
-]]></description>
-            <enclosure url="https://github.com/fulisadawang/aiphoto/releases/download/v0.8.0/AIPhoto-0.8.0.zip" length="5658370" type="application/octet-stream" sparkle:edSignature="XKNjCqLm4K+Y805CXrA902koYIIO1gypfd/31ETTOJEXQev8HfZTuZ5uU0L2xhXbS+upx1NG1SQiEuZc/n6iCg=="/>
         </item>
     </channel>
 </rss>
