@@ -1,0 +1,3 @@
+/* 访达和 Dock 里显示的名字；安装包文件名仍是 AIPhoto.app（改了会断 Sparkle 更新） */
+"CFBundleDisplayName" = "小宇专属";
+"CFBundleName" = "小宇专属";

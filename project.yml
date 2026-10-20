@@ -20,8 +20,11 @@ targets:
     info:
       path: AIPhoto/Info.plist
       properties:
-        CFBundleName: 小宇专属
-        CFBundleDisplayName: 小宇专属
+        # 基础名要和安装包文件名 AIPhoto.app 一致，系统才会用本地化的显示名；
+        # 访达、Dock、菜单栏显示的「小宇专属」来自 *.lproj/InfoPlist.strings
+        CFBundleName: AIPhoto
+        CFBundleDisplayName: AIPhoto
+        LSHasLocalizedDisplayName: true
         CFBundleShortVersionString: "$(MARKETING_VERSION)"
         CFBundleVersion: "$(CURRENT_PROJECT_VERSION)"
         LSApplicationCategoryType: public.app-category.photography
@@ -32,9 +35,10 @@ targets:
         SUPublicEDKey: UuKKT4SrkszM4j9yt/T6YaTUIvqodGB3aPwtxTty928=
         # 自用，不再在第二次启动时询问是否自动检查
         SUEnableAutomaticChecks: true
-        # 允许访问本机 http 服务（如 Magpie 127.0.0.1:3425）
+        # 允许访问任意 http 地址（本机 Magpie、局域网或其他机器上的服务、域名都可以，用户 2026-10-20 要求）。
+        # 不能同时写 NSAllowsLocalNetworking：有它时系统会忽略 NSAllowsArbitraryLoads
         NSAppTransportSecurity:
-          NSAllowsLocalNetworking: true
+          NSAllowsArbitraryLoads: true
         # 允许把文件夹拖到 Dock 图标上打开
         CFBundleDocumentTypes:
           - CFBundleTypeName: 照片文件夹

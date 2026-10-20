@@ -1,6 +1,6 @@
 # AI选片（aiphoto）
 
-App 显示名为「小宇专属」（2026-10-20 用户改名，`CFBundleDisplayName`）；工程名、`PRODUCT_NAME`（AIPhoto）和 bundle id（`com.nieyutan.aiphoto`）不改，改了会断掉 Sparkle 更新和已有设置。图标在 `AIPhoto/Assets.xcassets/AppIcon.appiconset`（AI 生成的红色草顶小木屋，已裁成 macOS 圆角方形）。
+App 显示名为「小宇专属」（2026-10-20 用户改名）。显示名来自 `AIPhoto/*.lproj/InfoPlist.strings` + `LSHasLocalizedDisplayName`；Info.plist 里的基础名必须保持 `AIPhoto`，与安装包文件名一致，否则访达和 Dock 会改显示文件名 AIPhoto。工程名、`PRODUCT_NAME`（AIPhoto）和 bundle id（`com.nieyutan.aiphoto`）不改，改了会断掉 Sparkle 更新和已有设置。图标在 `AIPhoto/Assets.xcassets/AppIcon.appiconset`（AI 生成的红色草顶小木屋，已裁成 macOS 圆角方形）。
 
 摄影师自用的 Mac 原生选片与修图客户端，场景是亲子 / 家庭纪实拍摄（RAW+JPG 混拍）。仅本人自用：不需要服务器、账号、计费，也不上架。用户使用说明见 `README.md`。
 
@@ -15,7 +15,7 @@ App 显示名为「小宇专属」（2026-10-20 用户改名，`CFBundleDisplayN
   ```
 - 运行：`open -a build/DerivedData/Build/Products/Debug/AIPhoto.app <照片文件夹>`（可直接带文件夹路径打开）。
 - 发版与自动更新（Sparkle 2）：`scripts/release.sh <版本号> [发布说明.md]` 改版本号、Release 编译、打 zip、签名并更新仓库根目录的 `appcast.xml`；加 `--publish` 才提交推送并创建 GitHub Release。App 从 `raw.githubusercontent.com/.../main/appcast.xml` 读更新清单，安装包下载自 Releases。EdDSA 私钥只在作者本机登录钥匙串（账户 `ed25519`），公钥在 `project.yml` 的 `SUPublicEDKey`；**私钥丢失后已安装的 App 无法再收到更新**。发版前须征得用户同意（公开发布）。
-- Swift 5 语言模式，macOS 15+，本机临时签名、无沙盒、无 Hardened Runtime。`NSAllowsLocalNetworking` 已开，用于访问本机 http 服务。
+- Swift 5 语言模式，macOS 15+，本机临时签名、无沙盒、无 Hardened Runtime。`NSAllowsArbitraryLoads` 已开，接口地址可以填任意 http 地址（本机、局域网、域名）；不要再加 `NSAllowsLocalNetworking`，有它时系统会忽略前者。
 - 没有单元测试。未经用户同意不要新增测试；验证方式见下文。
 
 ## 目录结构

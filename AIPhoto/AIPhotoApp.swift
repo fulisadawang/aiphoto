@@ -8,6 +8,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// 冷启动时文件夹可能先于窗口到达，先暂存
     private var pendingFolder: URL?
 
+    /// 主窗口被关掉后重新打开它；由窗口内容出现时设置
+    var reopenMain: (() -> Void)?
+
     var openFolder: ((URL) -> Void)? {
         didSet {
             guard let folder = pendingFolder, let openFolder else { return }
@@ -16,8 +19,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
+    /// 点左上角关闭只关窗口，App 留在 Dock 里，选片进度和撤销记录都还在
+    func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { false }
+
+    /// 窗口关掉后点 Dock 图标，把主窗口重新打开
+    func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows: Bool) -> Bool {
+        if !hasVisibleWindows { reopenMain?() }
+        return true
+    }
+
     func application(_ application: NSApplication, open urls: [URL]) {
         guard let folder = urls.first(where: \.hasDirectoryPath) else { return }
+        // 窗口关着时把文件夹拖到 Dock 图标上：先把窗口打开
+        reopenMain?()
         if let openFolder {
             openFolder(folder)
         } else {
@@ -46,6 +60,7 @@ struct AIPhotoApp: App {
                 .environment(model)
                 .frame(minWidth: 1100, minHeight: 700)
                 .onAppear { delegate.openFolder = { [model] in model.load($0) } }
+                .background(ReopenBridge(delegate: delegate))
         }
         .commands {
             CommandGroup(after: .appInfo) {
@@ -98,6 +113,16 @@ struct AIPhotoApp: App {
             SettingsView()
                 .environment(model)
         }
+    }
+}
+
+/// 把 SwiftUI 的 openWindow 交给 AppDelegate，窗口关掉后点 Dock 图标能重新打开
+private struct ReopenBridge: View {
+    @Environment(\.openWindow) private var openWindow
+    let delegate: AppDelegate
+
+    var body: some View {
+        Color.clear.onAppear { delegate.reopenMain = { openWindow(id: "main") } }
     }
 }
 
