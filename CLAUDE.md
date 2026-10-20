@@ -38,8 +38,7 @@ App 显示名为「小宇专属」（2026-10-20 用户改名）。显示名来�
 
 两项能力都走用户本机的 **Magpie**（OpenAI 兼容接口，`http://127.0.0.1:3425/v1`，不需要密钥）：
 
-- **AI 选片和找杂物**：`/chat/completions`，模型 `group/auto-gemini-3-8-flash`（2026-10-20 起；`group/auto-auto` 实测会被路由到 claude-sonnet-4-6）。**用户明确不用 Claude 选片，也不要通过 Magpie 代理 Claude 接口。**
-- **对话改图**：`/chat/completions`，模型 `group/auto-gemini-3-8-flash`（设置可改）。需要框出物体位置，实拍对比 `group/auto-auto` 定位不准。
+- **AI 选片、找杂物、对话改图**：`/chat/completions`，推荐模型 `group/vision-retouch`（Magpie「视觉修图」路由组，2026-10-20 实拍验证后改为推荐，当时路由到 gpt-5.6-luna），出错自动换 `group/auto-gemini-3-8-flash`（原推荐，Antigravity 常无容量）。每种用途可在设置里单独改（`AIModels.swift`）。`group/auto-auto` 实测会被路由到 claude-sonnet-4-6 且定位不准。**用户明确不用 Claude 选片，也不要通过 Magpie 代理 Claude 接口**；路由组背后的模型可能变化，用量统计里出现 Claude 会醒目提示。
 - **去杂物**：`/images/edits`，**模型留空**，由 Magpie 使用默认的 `codex/gpt-image-2`。`group/auto-auto` 会被路由到只回文字的模型，不出图。
 
 ## 数据与设计约束

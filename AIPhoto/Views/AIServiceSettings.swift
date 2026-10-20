@@ -372,7 +372,7 @@ private struct ModelRow: View {
             .padding(.leading, 36)
             if isCustom {
                 HStack(spacing: 6) {
-                    TextField("", text: $draft, prompt: Text(use == .image ? "会画图的模型名" : "能看图的模型名，如 codex/gpt-5.6-luna"))
+                    TextField("", text: $draft, prompt: Text(use == .image ? "会画图的模型名" : "能看图的模型名，如 codex/gpt-6.1-sol"))
                         .labelsHidden()
                         .onSubmit(applyDraft)
                     Button("使用", action: applyDraft)

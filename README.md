@@ -42,8 +42,8 @@ open build/DerivedData/Build/Products/Release/AIPhoto.app
 
 | 用途 | 接口 | 默认模型 | 说明 |
 |---|---|---|---|
-| AI 选片 | `/chat/completions` | `group/auto-gemini-3-8-flash` | 需要能看图；不用 `group/auto-auto`，它会被路由到 Claude |
-| 对话改图 | `/chat/completions` | `group/auto-gemini-3-8-flash` | 需要能准确框出物体位置，实测 Gemini 系列更准 |
+| AI 选片 | `/chat/completions` | `group/vision-retouch`（视觉修图） | 需要能看图；出错自动换 `group/auto-gemini-3-8-flash`；不用 `group/auto-auto`，它会被路由到 Claude |
+| 对话改图 | `/chat/completions` | `group/vision-retouch`（视觉修图） | 需要能准确框出物体位置；设置 › AI 服务里可按用途换模型 |
 | 去杂物 / 重画 | `/images/edits` | 留空（服务默认图片模型） | 必须是能出图的模型 |
 
 换成其他服务时，把接口地址和模型改成该服务提供的即可；需要密钥的服务在设置里保存到钥匙串。

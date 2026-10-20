@@ -58,33 +58,36 @@ struct ModelOption: Identifiable, Hashable {
 }
 
 enum ModelCatalog {
-    /// 不用 auto-auto：实测会被路由到 Claude（用户明确不用 Claude），而且对话改图 3 次都把小狗框到木门上，Gemini 3 次都框准
+    /// Magpie 的「视觉修图」路由组（2026-10-20 新增，当时路由到 gpt-5.6-luna）。
+    /// 实拍验证：31 张 AI 选片 18 秒全部完成、理由符合亲子纪实标准；找杂物的人、推车、桌子框得准，不碰孩子
+    static let visionRetouch = "group/vision-retouch"
+    /// 原推荐。2026-10-20 起 Antigravity 经常无容量、请求超时，改为备用
     static let gemini = "group/auto-gemini-3-8-flash"
     static let glm = "workbuddy/glm-5v-turbo"
     static let gptSol = "codex/gpt-6.1-sol"
 
-    /// 只有现在在用的模型实测过；其他候选按用户决定先不实测，标「未测试」（需求清单第 14 节）
+    /// 推荐和 Gemini 实测过；其他候选按用户决定先不实测，标「未测试」（需求清单第 14 节）
     static func options(for use: AIUse) -> [ModelOption] {
         switch use {
         case .culling:
             [
-                ModelOption(id: gemini, name: "Gemini 3.8 Flash", note: "推荐", recommended: true),
-                ModelOption(id: "codex/gpt-5.6-luna", name: "GPT-5.6 Luna", note: "未测试"),
+                ModelOption(id: visionRetouch, name: "视觉修图", note: "推荐", recommended: true),
+                ModelOption(id: gemini, name: "Gemini 3.8 Flash", note: "备用 · 常无响应"),
                 ModelOption(id: glm, name: "GLM-5V Turbo", note: "未测试"),
                 ModelOption(id: gptSol, name: "GPT-6.1 Sol", note: "未测试"),
             ]
         case .locate:
             [
-                ModelOption(id: gemini, name: "Gemini 3.8 Flash", note: "推荐 · 定位准", recommended: true),
-                ModelOption(id: "codex/gpt-6-luna", name: "GPT-6 Luna", note: "未测试"),
+                ModelOption(id: visionRetouch, name: "视觉修图", note: "推荐 · 定位准", recommended: true),
+                ModelOption(id: gemini, name: "Gemini 3.8 Flash", note: "备用 · 常无响应"),
                 ModelOption(id: gptSol, name: "GPT-6.1 Sol", note: "未测试"),
-                // 实测会被路由到 Claude，而且框不准
+                // 不用 auto-auto：实测会被路由到 Claude（用户明确不用 Claude），而且对话改图 3 次都把小狗框到木门上
                 ModelOption(id: "group/auto-auto", name: "auto-auto", note: "不建议 · 框不准", discouraged: true),
             ]
         case .chat:
             [
-                ModelOption(id: gemini, name: "Gemini 3.8 Flash", note: "推荐", recommended: true),
-                ModelOption(id: "codex/gpt-6-luna", name: "GPT-6 Luna", note: "未测试"),
+                ModelOption(id: visionRetouch, name: "视觉修图", note: "推荐", recommended: true),
+                ModelOption(id: gemini, name: "Gemini 3.8 Flash", note: "备用 · 常无响应"),
                 ModelOption(id: gptSol, name: "GPT-6.1 Sol", note: "未测试"),
             ]
         case .look:
@@ -135,11 +138,12 @@ enum ModelCatalog {
 
     static func resetToRecommended() { apply(.recommended) }
 
-    /// 出错时换用的模型：开关打开、且当前用的不是推荐模型时才有
+    /// 出错时换用的模型：用的不是推荐模型时换推荐模型；用的就是推荐模型时换 Gemini 备用
     static func fallback(for use: AIUse, current: String) -> String? {
         let recommended = recommended(for: use == .look ? .culling : use)
-        guard AppSettings.autoFallback, !recommended.isEmpty, recommended != current else { return nil }
-        return recommended
+        guard AppSettings.autoFallback, !recommended.isEmpty else { return nil }
+        let backup = recommended == current ? gemini : recommended
+        return backup == current ? nil : backup
     }
 
     static func displayName(_ id: String, use: AIUse) -> String {
@@ -148,6 +152,14 @@ enum ModelCatalog {
 
     static func registerDefaults() {
         let defaults = UserDefaults.standard
+        // 推荐从 Gemini 改成视觉修图组（2026-10-20）：存着旧推荐值的改成新推荐，只迁移一次
+        let migrationKey = "migratedToVisionRetouch"
+        if !defaults.bool(forKey: migrationKey) {
+            for use in [AIUse.culling, .locate, .chat] where defaults.string(forKey: use.key) == gemini {
+                defaults.set(visionRetouch, forKey: use.key)
+            }
+            defaults.set(true, forKey: migrationKey)
+        }
         // 旧版本找杂物和 AI 选片共用一个模型：升级时自己填过选片模型的，找杂物沿用它
         if defaults.object(forKey: AIUse.locate.key) == nil, let old = defaults.string(forKey: AppSettings.modelKey), !old.isEmpty {
             defaults.set(old, forKey: AIUse.locate.key)
