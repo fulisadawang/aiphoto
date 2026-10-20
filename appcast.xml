@@ -3,6 +3,25 @@
     <channel>
         <title>AIPhoto</title>
         <item>
+            <title>0.4.0</title>
+            <pubDate>Tue, 20 Oct 2026 11:46:24 +0800</pubDate>
+            <sparkle:version>5</sparkle:version>
+            <sparkle:shortVersionString>0.4.0</sparkle:shortVersionString>
+            <sparkle:minimumSystemVersion>15.0</sparkle:minimumSystemVersion>
+            <sparkle:hardwareRequirements>arm64</sparkle:hardwareRequirements>
+            <description sparkle:format="markdown"><![CDATA[## v0.4.0
+
+### 多图合成
+- 右侧面板「合成 › 从同一场的其他照片取…」，把另一张照片里的人或东西拿到当前照片
+- 点一下就能选中人、动物或物品，不准的地方用画笔补选或擦除
+- 连拍换人：全家福有人闭眼时，从相邻连拍里点一下这个人，自动对齐替换
+- 其他照片可以拖动、缩放、水平翻转后放好
+- 可选「AI 融合边缘和影子」，让拿过来的东西更自然
+- 合成结果可以撤销，也可以按 \ 对比前后
+]]></description>
+            <enclosure url="https://github.com/fulisadawang/aiphoto/releases/download/v0.4.0/AIPhoto-0.4.0.zip" length="5273806" type="application/octet-stream" sparkle:edSignature="dL2avj4ab18jeaS02RW4DckMFy07C7WGuSK6e0ZcPTUQSEgr603uX11WIAsHVXWYpKHarw05T22kj47U75+HDA=="/>
+        </item>
+        <item>
             <title>0.3.0</title>
             <pubDate>Tue, 20 Oct 2026 11:24:29 +0800</pubDate>
             <sparkle:version>4</sparkle:version>
@@ -39,40 +58,6 @@
 - App 名字改为「小宇专属」
 ]]></description>
             <enclosure url="https://github.com/fulisadawang/aiphoto/releases/download/v0.2.1/AIPhoto-0.2.1.zip" length="5078817" type="application/octet-stream" sparkle:edSignature="PGA6HiaUq2rZWkurzUtGPek2JF+E2ZmLWgufp9f5h5nQv2rqIaoSmsn9mOBHm8DvBZiFhowBRczCCn6OCL7lCg=="/>
-        </item>
-        <item>
-            <title>0.2.0</title>
-            <pubDate>Mon, 19 Oct 2026 21:00:46 +0800</pubDate>
-            <sparkle:version>2</sparkle:version>
-            <sparkle:shortVersionString>0.2.0</sparkle:shortVersionString>
-            <sparkle:minimumSystemVersion>15.0</sparkle:minimumSystemVersion>
-            <sparkle:hardwareRequirements>arm64</sparkle:hardwareRequirements>
-            <description sparkle:format="markdown"><![CDATA[## v0.2.0
-
-第一个公开发布的版本。
-
-### 选片
-- 本地分析：主体清晰度、人脸与闭眼、曝光；按连拍和同场景自动分组，每组预选一张
-- AI 选片：按亲子纪实标准评估每组并写出理由
-- 网格总览（G），框选后批量选用 / 淘汰
-
-### 看片
-- 放大查焦：滚轮、双击、Z 键缩放，空格放大到人脸，导航小图
-- 合焦高亮（K）、过曝提示（J）、直方图与拍摄参数、佳能相机对焦点（F）
-- 修复前后对比（\），放大时两侧同步
-
-### 初修
-- 自动调色（带高光保护）、皮肤轻度柔化、个人风格
-- 一键去干扰物、整组去杂物、一键初修已选照片并给出总结
-- 对话改图：右侧面板用一句话修改当前照片，支持多轮
-
-### 其他
-- 撤销 / 重做（⌘Z / ⇧⌘Z）
-- 自动更新（「AI选片 › 检查更新…」）
-
-首次打开会被系统拦截（没有 Apple 开发者签名），请到「系统设置 › 隐私与安全性」点「仍要打开」。
-]]></description>
-            <enclosure url="https://github.com/fulisadawang/aiphoto/releases/download/v0.2.0/AIPhoto-0.2.0.zip" length="1869085" type="application/octet-stream" sparkle:edSignature="FGfCTeNuclzeqCmxWxrh/B309KwrnCpCMSv2jDMgTmFFZkv/QYRtgk0pM7Q1aAtXEWuwvQ94LWj9jJFd0KVJAA=="/>
         </item>
     </channel>
 </rss>
