@@ -45,7 +45,15 @@ struct GroupRow: View {
                 HStack(spacing: 4) {
                     Text("第 \(group.id) 组")
                         .fontWeight(.medium)
-                    if reviewed {
+                    if model.aiRun?.running.contains(group.id) == true {
+                        ProgressView()
+                            .controlSize(.mini)
+                            .help("AI 正在评估这一组")
+                    } else if model.aiRun?.queued.contains(group.id) == true {
+                        Image(systemName: "clock")
+                            .foregroundStyle(.secondary)
+                            .help("排队等 AI 评估")
+                    } else if reviewed {
                         Image(systemName: "sparkles")
                             .foregroundStyle(.purple)
                             .help("已经过 AI 评估")

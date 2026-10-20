@@ -63,6 +63,11 @@ final class AppModel {
     var brushSize: CGFloat = 0.03
 
     var isBusy = false
+    /// 当前的忙碌任务可以中途取消（AI 选片）
+    var canCancelBusy = false
+    private var busyTask: Task<Void, Never>?
+    /// AI 选片进行中的进度：按张数统计，侧栏据此标出排队中 / 评估中的组
+    var aiRun: AIRunProgress?
     var progress: Double = 0
     var statusText = ""
     var alert: AlertInfo?
@@ -332,7 +337,7 @@ final class AppModel {
     func runAI(all: Bool) {
         Task {
             guard let client = await makeVisionClient(use: .culling, purpose: .culling) else { return }
-            perform("AI 选片中…") { try await self.rankWithAI(client: client, all: all) }
+            perform("AI 选片中…", cancellable: true) { try await self.rankWithAI(client: client, all: all) }
         }
     }
 
@@ -360,6 +365,8 @@ final class AppModel {
 
     private struct BatchOutcome {
         let verdicts: Result<[String: AIVerdict], Error>
+        let photos: Int
+        let groupIDs: Set<Int>
     }
 
     private func rankWithAI(client: VisionChatClient, all: Bool) async throws {
@@ -374,41 +381,61 @@ final class AppModel {
             for id in targets.flatMap(\.photoIDs) { photos[id]?.ai = nil }
         }
 
+        var run = AIRunProgress(totalPhotos: batches.map(\.count).reduce(0, +), queued: Set(batches.flatMap { $0.map(\.groupID) }))
+        aiRun = run
+        defer { aiRun = nil }
         progress = 0
-        statusText = "AI 选片中 0/\(batches.count) 批"
+        statusText = run.statusText
         var failures: [String] = []
         var done = 0
         await withTaskGroup(of: BatchOutcome.self) { group in
             var next = 0
             func enqueue() {
-                guard next < batches.count else { return }
+                guard next < batches.count, !Task.isCancelled else { return }
                 let batch = batches[next]
                 next += 1
+                let groupIDs = Set(batch.map(\.groupID))
+                run.queued.subtract(groupIDs)
+                run.running.formUnion(groupIDs)
                 group.addTask {
                     do {
-                        return BatchOutcome(verdicts: .success(try await ranker.rank(batch)))
+                        return BatchOutcome(verdicts: .success(try await ranker.rank(batch)), photos: batch.count, groupIDs: groupIDs)
                     } catch {
-                        return BatchOutcome(verdicts: .failure(error))
+                        return BatchOutcome(verdicts: .failure(error), photos: batch.count, groupIDs: groupIDs)
                     }
                 }
             }
             // 并发 3 个请求，兼顾速度和接口限流
             for _ in 0..<min(3, batches.count) { enqueue() }
+            aiRun = run
             while let outcome = await group.next() {
                 switch outcome.verdicts {
                 case .success(let verdicts):
                     for (id, verdict) in verdicts { photos[id]?.ai = verdict }
                 case .failure(let error):
-                    failures.append(error.localizedDescription)
+                    // 取消导致中断的请求不算失败
+                    if !Task.isCancelled { failures.append(error.localizedDescription) }
                 }
+                guard !Task.isCancelled else { continue }
                 done += 1
-                progress = Double(done) / Double(batches.count)
-                statusText = "AI 选片中 \(done)/\(batches.count) 批"
+                run.donePhotos += outcome.photos
+                run.running.subtract(outcome.groupIDs)
+                aiRun = run
+                progress = Double(run.donePhotos) / Double(max(1, run.totalPhotos))
+                statusText = run.statusText
                 applyAutoDecisions()
                 enqueue()
+                aiRun = run
             }
         }
         scheduleSave()
+        if Task.isCancelled {
+            alert = AlertInfo(
+                title: "已取消 AI 选片",
+                message: "已评估 \(run.donePhotos)/\(run.totalPhotos) 张，结果已保存。再点「AI 选片」会只处理还没评估的组。"
+            )
+            return
+        }
         if !failures.isEmpty {
             alert = AlertInfo(
                 title: "\(failures.count)/\(batches.count) 批请求失败",
@@ -1482,20 +1509,32 @@ final class AppModel {
 
     // MARK: - 工具
 
-    private func perform(_ title: String, _ work: @escaping () async throws -> Void) {
+    private func perform(_ title: String, cancellable: Bool = false, _ work: @escaping () async throws -> Void) {
         guard !isBusy else { return }
         isBusy = true
+        canCancelBusy = cancellable
         statusText = title
         progress = 0
-        Task {
+        busyTask = Task {
             do {
                 try await work()
+            } catch is CancellationError {
+                // 用户主动取消，结果由 work 自己说明
             } catch {
                 alert = AlertInfo(title: "出错了", message: error.localizedDescription)
             }
             isBusy = false
+            canCancelBusy = false
+            busyTask = nil
             statusText = ""
         }
+    }
+
+    /// 取消正在进行的 AI 选片：已完成的批次结果保留，正在发的请求立即中断
+    func cancelBusy() {
+        guard canCancelBusy else { return }
+        statusText = "正在取消…"
+        busyTask?.cancel()
     }
 
     /// 选片操作很频繁，合并 1 秒内的修改再写盘
@@ -1823,5 +1862,27 @@ enum EditTool: String, CaseIterable, Identifiable {
         case .chat: "bubble.left.and.text.bubble.right"
         case .log: "list.bullet.clipboard"
         }
+    }
+}
+
+/// AI 选片进度：按张数统计并估算剩余时间
+struct AIRunProgress {
+    let totalPhotos: Int
+    var donePhotos = 0
+    let start = Date()
+    /// 还没发出的组、正在等 AI 回复的组
+    var queued: Set<Int>
+    var running: Set<Int> = []
+
+    var statusText: String {
+        var text = "AI 选片：已评估 \(donePhotos)/\(totalPhotos) 张"
+        if donePhotos > 0, donePhotos < totalPhotos {
+            let elapsed = Date().timeIntervalSince(start)
+            let remaining = elapsed / Double(donePhotos) * Double(totalPhotos - donePhotos)
+            text += remaining < 60 ? " · 约剩不到 1 分钟" : " · 约剩 \(Int((remaining / 60).rounded())) 分钟"
+        } else if donePhotos == 0 {
+            text += " · 等第一批结果来估算时间"
+        }
+        return text
     }
 }

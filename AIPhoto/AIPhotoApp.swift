@@ -102,6 +102,10 @@ struct AIPhotoApp: App {
                     Button("按当前设置重新分组") { model.regroup() }
                 }
                 .disabled(model.groups.isEmpty || model.isBusy)
+                Button("取消 AI 选片") { model.cancelBusy() }
+                    .keyboardShortcut(".", modifiers: .command)
+                    .disabled(!model.canCancelBusy)
+                Divider()
                 Button("从修图样片学习风格…") { model.learnStyle() }
                     .disabled(model.isBusy)
                 Button("管理修图预设…") { model.showPresetManager = true }

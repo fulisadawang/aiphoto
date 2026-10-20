@@ -32,7 +32,8 @@ struct VisionChatClient {
             return try await send(model: model, system: system, content: content, fallback: false)
         } catch {
             // 选的模型报错、连不上、回复格式不对都换推荐模型再试一次：没实测过的模型可能不支持看图或不按格式回复
-            guard let fallbackModel else { throw error }
+            // 用户取消时不再换模型重试
+            guard let fallbackModel, !Task.isCancelled else { throw error }
             return try await send(model: fallbackModel, system: system, content: content, fallback: true)
         }
     }

@@ -154,6 +154,16 @@ struct StatusBar: View {
                 ProgressView(value: model.progress)
                     .frame(width: 160)
                 Text(model.statusText)
+                    .monospacedDigit()
+                if model.canCancelBusy {
+                    Button {
+                        model.cancelBusy()
+                    } label: {
+                        Label("取消", systemImage: "xmark.circle.fill")
+                    }
+                    .controlSize(.small)
+                    .help("停止 AI 选片，已完成的结果保留（⌘.）")
+                }
             } else if !model.groups.isEmpty {
                 Text("← → 切换照片　↑ ↓ 切换组　P 选用　X 淘汰　U 取消　1-5 星级　空格 放大人脸　F 人脸框　A 自动调色　\\ 修复前后对比　B 画笔去杂物　Z 缩放　K 合焦高亮　J 过曝提示　G 网格总览")
                     .foregroundStyle(.secondary)
