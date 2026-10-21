@@ -3,6 +3,22 @@
     <channel>
         <title>AIPhoto</title>
         <item>
+            <title>0.9.1</title>
+            <pubDate>Wed, 21 Oct 2026 23:17:47 +0800</pubDate>
+            <sparkle:version>15</sparkle:version>
+            <sparkle:shortVersionString>0.9.1</sparkle:shortVersionString>
+            <sparkle:minimumSystemVersion>15.0</sparkle:minimumSystemVersion>
+            <sparkle:hardwareRequirements>arm64</sparkle:hardwareRequirements>
+            <description sparkle:format="markdown"><![CDATA[## 修复：每次更新后都要重新允许钥匙串
+
+- API 密钥改存在本机（`~/Library/Application Support/AIPhoto/secrets.json`，只有你的用户能读），不再放钥匙串
+- 以前每次更新后都会弹「始终允许」，拒绝了就像密钥丢了；以后不会再弹
+- 以前保存过的密钥会自动搬过来：第一次用到时可能最后弹一次授权框，点允许即可，之后不再出现
+- 用本机 Magpie（不需要密钥）的不受影响
+]]></description>
+            <enclosure url="https://github.com/fulisadawang/aiphoto/releases/download/v0.9.1/AIPhoto-0.9.1.zip" length="5733262" type="application/octet-stream" sparkle:edSignature="XotMkO6BXHgLTntjjDszEnBy3prGak2LVP0LJzF/AEmNV9h+pqq6hnxeR7FOeejVJisRMcZVGTp/80MIQWaFAQ=="/>
+        </item>
+        <item>
             <title>0.9.0</title>
             <pubDate>Wed, 21 Oct 2026 17:01:20 +0800</pubDate>
             <sparkle:version>14</sparkle:version>
@@ -41,21 +57,6 @@
 - 一键初修找杂物时，虚化的前景树叶、枝条不再去除
 ]]></description>
             <enclosure url="https://github.com/fulisadawang/aiphoto/releases/download/v0.8.4/AIPhoto-0.8.4.zip" length="5682454" type="application/octet-stream" sparkle:edSignature="wELMWBVjYrU1weH1kkKhEaSfh/RoJVWm3H084Jd2jLkAeXpGoF5eBt5bCusDY9zArbqLXNmPKc4+TSvBxqZAAA=="/>
-        </item>
-        <item>
-            <title>0.8.3</title>
-            <pubDate>Tue, 20 Oct 2026 22:42:14 +0800</pubDate>
-            <sparkle:version>12</sparkle:version>
-            <sparkle:shortVersionString>0.8.3</sparkle:shortVersionString>
-            <sparkle:minimumSystemVersion>15.0</sparkle:minimumSystemVersion>
-            <sparkle:hardwareRequirements>arm64</sparkle:hardwareRequirements>
-            <description sparkle:format="markdown"><![CDATA[## AI 选片可以取消，进度更清楚
-
-- AI 选片时底部状态栏有「取消」按钮，菜单「选片 › 取消 AI 选片」（⌘.）也可以；已评估的结果保留，再点「AI 选片」只处理剩下的组
-- 进度改为显示已评估多少张，并估算大约还要多久
-- 左侧分组列表里，排队中的组显示时钟，正在评估的组显示转圈
-]]></description>
-            <enclosure url="https://github.com/fulisadawang/aiphoto/releases/download/v0.8.3/AIPhoto-0.8.3.zip" length="5682083" type="application/octet-stream" sparkle:edSignature="SknPoA4KCf9ja+5qiCQqqEOO52R3zXo+xvDMwPTIC6nF7PDryPqQKS9xXIaOSu1BhZ8FGh78TWv+MCGZUliFAA=="/>
         </item>
     </channel>
 </rss>
