@@ -19,7 +19,7 @@ enum InpaintService: String, CaseIterable, Identifiable {
     static let serviceKey = "inpaintService"
     static let baseURLKey = "inpaintBaseURL"
     static let modelKey = "inpaintModel"
-    static let keychainAccount = "inpaint-api-key"
+    static let secretAccount = "inpaint-api-key"
     /// 画图是否单独设置连接；不单独设置时和看图的 AI 共用地址与密钥
     static let separateKey = "inpaintSeparate"
 
@@ -68,7 +68,7 @@ enum InpaintService: String, CaseIterable, Identifiable {
             let model = ModelCatalog.model(for: .image)
             return OpenAICompatibleInpainter(
                 baseURL: baseURL,
-                apiKey: try await KeychainStore.loadIfSaved(account: separate ? keychainAccount : AppSettings.keychainAccount) ?? "",
+                apiKey: try await SecretStore.loadIfSaved(account: separate ? secretAccount : AppSettings.secretAccount) ?? "",
                 model: model.isEmpty ? nil : model,
                 purpose: purpose
             )

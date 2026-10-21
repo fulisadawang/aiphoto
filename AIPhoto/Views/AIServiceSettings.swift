@@ -44,8 +44,8 @@ struct AIServiceSettings: View {
             await loadRecentModels()
         }
         .onAppear {
-            keyStatus = KeychainStore.isSaved(account: AppSettings.keychainAccount) ? "已保存" : ""
-            imageKeyStatus = KeychainStore.isSaved(account: InpaintService.keychainAccount) ? "已保存" : ""
+            keyStatus = SecretStore.isSaved(account: AppSettings.secretAccount) ? "已保存" : ""
+            imageKeyStatus = SecretStore.isSaved(account: InpaintService.secretAccount) ? "已保存" : ""
         }
     }
 
@@ -198,8 +198,8 @@ struct AIServiceSettings: View {
                         .onSubmit { Task { await check() } }
                 }
                 Divider()
-                SettingRow(symbol: "key", tint: .gray, title: "密钥", detail: keyStatus == "已保存" ? "已保存在钥匙串" : "用 Magpie 不需要") {
-                    keyField(text: $apiKey, saved: keyStatus == "已保存") { saveKey(apiKey, account: AppSettings.keychainAccount) { keyStatus = $0; apiKey = "" } }
+                SettingRow(symbol: "key", tint: .gray, title: "密钥", detail: keyStatus == "已保存" ? "已保存在本机" : "用 Magpie 不需要") {
+                    keyField(text: $apiKey, saved: keyStatus == "已保存") { saveKey(apiKey, account: AppSettings.secretAccount) { keyStatus = $0; apiKey = "" } }
                 }
                 Divider()
                 SettingRow(symbol: "paintbrush.pointed", tint: .purple, title: "画图的 AI", detail: "去杂物、重画、合成时用") {
@@ -222,9 +222,9 @@ struct AIServiceSettings: View {
                         }
                     }
                     Divider()
-                    SettingRow(symbol: "key", tint: .gray, title: "画图密钥", detail: imageKeyStatus == "已保存" ? "已保存在钥匙串" : "可选") {
+                    SettingRow(symbol: "key", tint: .gray, title: "画图密钥", detail: imageKeyStatus == "已保存" ? "已保存在本机" : "可选") {
                         keyField(text: $imageKey, saved: imageKeyStatus == "已保存") {
-                            saveKey(imageKey, account: InpaintService.keychainAccount) { imageKeyStatus = $0; imageKey = "" }
+                            saveKey(imageKey, account: InpaintService.secretAccount) { imageKeyStatus = $0; imageKey = "" }
                         }
                     }
                 }
@@ -309,7 +309,7 @@ struct AIServiceSettings: View {
     private func check() async {
         probe = .checking
         do {
-            let key = try await KeychainStore.loadIfSaved(account: AppSettings.keychainAccount) ?? ""
+            let key = try await SecretStore.loadIfSaved(account: AppSettings.secretAccount) ?? ""
             probe = .ok(try await ServiceProbe.modelCount(baseURL: baseURL, apiKey: key))
         } catch {
             probe = .failed(ServiceProbe.hint(error, baseURL: baseURL))
@@ -319,7 +319,7 @@ struct AIServiceSettings: View {
     private func checkImage() async {
         imageProbe = .checking
         do {
-            let key = try await KeychainStore.loadIfSaved(account: InpaintService.keychainAccount) ?? ""
+            let key = try await SecretStore.loadIfSaved(account: InpaintService.secretAccount) ?? ""
             imageProbe = .ok(try await ServiceProbe.modelCount(baseURL: imageBaseURL, apiKey: key))
         } catch {
             imageProbe = .failed(ServiceProbe.hint(error, baseURL: imageBaseURL))
@@ -328,7 +328,7 @@ struct AIServiceSettings: View {
 
     private func saveKey(_ value: String, account: String, done: (String) -> Void) {
         do {
-            try KeychainStore.save(value.trimmingCharacters(in: .whitespacesAndNewlines), account: account)
+            try SecretStore.save(value.trimmingCharacters(in: .whitespacesAndNewlines), account: account)
             done("已保存")
         } catch {
             done(error.localizedDescription)

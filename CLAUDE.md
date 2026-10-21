@@ -30,7 +30,7 @@ App 显示名为「小宇专属」（2026-10-20 用户改名）。显示名来�
   - `ChatEditor` 对话改图：把一句话换算成调色参数、要去掉的物体和要重画的区域，并校正位置；
   - `CleanupEngine` + `InpaintService` 去杂物（也用于对话改图的重画，传入指令）；`DistractionLocator` 让看图模型框出干扰物并转成画笔笔触；`PhotoRenderer` 合成修补块、套用修图、导出 JPG
   - `ViewingAids` 直方图、合焦高亮、过曝欠曝提示、拍摄参数；`AFPointReader` 解析佳能 MakerNote 的 AFInfo2 读相机对焦点
-  - `XMPWriter` 星级写回；`SessionStore` 选片记录；`KeychainStore` 密钥；`ImageLoader` 读图与缓存
+  - `XMPWriter` 星级写回；`SessionStore` 选片记录；`SecretStore` 密钥（本地文件）；`ImageLoader` 读图与缓存
 - `AIPhoto/Views/`：SwiftUI 界面。侧栏分组 `GroupSidebar`、大图 `PhotoViewer`（基于 `ZoomableImage`：放大平移、修复前后对比分割线、导航图）、胶片条 `Filmstrip`、右侧 `InspectorView`（顶部切换选片 / 修图：选片模式 `CullingInspector` 只放判断用的信息；修图模式 `EditingInspector` 用竖向工具栏切换 `EditTool`：调色 `EditSection`、人像 `PortraitSection`、去杂物 `CleanupSection`、对话改图 `ChatPanel`、合成、对话改图 `ChatPanel`、初修记录；模式和工具存在 `AppModel.inspectorMode` / `editTool` 并记在 UserDefaults；以及 `ShootingInfoSection`、`CleanupSection`、`EditSection`、`RetouchLogSection`）、一键初修 `RetouchViews`、`SettingsView`（AI 服务页在 `AIServiceSettings`：新手区状态 + 档位，高级设置收起）。
 - 需求与验收标准见 `docs/需求清单.md`，新功能先在那里确认再开发。
 
@@ -78,7 +78,7 @@ App 显示名为「小宇专属」（2026-10-20 用户改名）。显示名来�
 - **对话结果卡片**：AI 回复带 `ChatStep`（改动说明、调色前参数、后台任务数、生成的修补块 id），后台任务用 `chatMessageID` 回写到卡片；「撤销这步」只在最新一张卡片上，撤销后正在跑的任务结果不再贴上。
 - **AI 请求必须带 `MagpieUsage.userAgent`**：Magpie 按 User-Agent 区分调用方，用量统计靠它；新增 AI 调用时要传 `AIPurpose`，否则统计里没有这一项。
 - **右侧面板自动切换**：入口要用 `AppModel.showTool(_:)` 切到修图模式的对应工具；画笔只属于去杂物工具，离开该工具或切回选片模式会自动关闭画笔。新增修图工具时加到 `EditTool`。
-- **钥匙串会卡界面**：临时签名每次重新编译都会变，读钥匙串时 macOS 弹授权框，同步读取会把主线程卡住。现在只在设置里保存过密钥时才读（`KeychainStore.isSaved` 记在 UserDefaults），并在后台读（`loadIfSaved`）。Magpie 不需要密钥，不会触发读取。
+- **API 密钥存本地文件，不用钥匙串**（`SecretStore`，2026-10-21 用户决定）：`~/Library/Application Support/AIPhoto/secrets.json`，权限 600，先写临时文件再替换。原因：本机临时签名每次更新都变，钥匙串每次更新后弹「始终允许」，拒绝了就像密钥丢了。旧版本钥匙串里的密钥第一次用到时在后台读一次（可能最后弹一次授权框），写进本地文件并从钥匙串删除。只在保存过密钥时才读，Magpie 不需要密钥，不会触发。
 - **对话改图的位置不能直接信模型**：人像修饰对齐本地人脸框，其他物体放大局部再确认（`ChatEditor.resolve`）。重画放大回原尺寸超过 3 倍不执行（`maxRedrawUpscale`），大面积改色走整体调色。
 - 主窗口的快捷键挂在 `ContentView` 上，文本框有焦点时必须让出（`isEditingText`），否则在对话框里打字会触发淘汰、缩放等。
 - 连拍分组：间隔 ≤ 1 秒算同一连拍；否则同场景 30 秒内、画面差异 ≤ 0.3 也归一组。

@@ -382,7 +382,7 @@ final class AppModel {
         do {
             return VisionChatClient(
                 baseURL: baseURL,
-                apiKey: try await KeychainStore.loadIfSaved(account: AppSettings.keychainAccount) ?? "",
+                apiKey: try await SecretStore.loadIfSaved(account: AppSettings.secretAccount) ?? "",
                 model: model,
                 purpose: purpose
             )

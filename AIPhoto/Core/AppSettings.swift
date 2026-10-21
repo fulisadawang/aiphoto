@@ -5,7 +5,7 @@ enum AppSettings {
     static let modelKey = "selectModel"
     static let chatModelKey = "chatEditModel"
     static let baseURLKey = "selectBaseURL"
-    static let keychainAccount = "select-api-key"
+    static let secretAccount = "select-api-key"
     static let perGroupKey = "aiCandidatesPerGroup"
     static let blurKey = "blurThreshold"
     static let gapKey = "burstMaxGap"

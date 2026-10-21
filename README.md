@@ -46,7 +46,7 @@ open build/DerivedData/Build/Products/Release/AIPhoto.app
 | 对话改图 | `/chat/completions` | `group/vision-retouch`（视觉修图） | 需要能准确框出物体位置；设置 › AI 服务里可按用途换模型 |
 | 去杂物 / 重画 | `/images/edits` | 留空（服务默认图片模型） | 必须是能出图的模型 |
 
-换成其他服务时，把接口地址和模型改成该服务提供的即可；需要密钥的服务在设置里保存到钥匙串。
+换成其他服务时，把接口地址和模型改成该服务提供的即可；需要密钥的服务在设置里填写，密钥保存在本机 `~/Library/Application Support/AIPhoto/secrets.json`（只有你的用户能读）。
 
 **隐私**：AI 选片会上传缩小后的照片，去杂物和对话改图会上传照片的局部或缩小图到你配置的服务。用本机服务时照片不出电脑；用云端服务前请确认对方的数据政策。
 
