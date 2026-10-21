@@ -3,6 +3,30 @@
     <channel>
         <title>AIPhoto</title>
         <item>
+            <title>0.9.0</title>
+            <pubDate>Wed, 21 Oct 2026 17:01:20 +0800</pubDate>
+            <sparkle:version>14</sparkle:version>
+            <sparkle:shortVersionString>0.9.0</sparkle:shortVersionString>
+            <sparkle:minimumSystemVersion>15.0</sparkle:minimumSystemVersion>
+            <sparkle:hardwareRequirements>arm64</sparkle:hardwareRequirements>
+            <description sparkle:format="markdown"><![CDATA[## 打开文件夹时先选「这批照片怎么处理」
+
+- **AI 选片**：和以前一样，AI 帮你挑，可以一键初修（调色、磨皮、去杂物）
+- **自己选片**：不替你预选，只提示模糊、闭眼；工具栏有「一键去杂物」，只去路人、垃圾、杂物，**不调色、不磨皮**
+- **已选好，只修图**：适合已经调好色的成片，不分组、不选片，全部手动修，不会自动改颜色；导出全部照片
+- 工具栏可以随时切换方式，已标的选用、淘汰不会丢
+
+## 工具栏
+- 所有按钮改成「图标 + 中文」，AI 选片和一键初修不再长得一样
+
+## 模型选择
+- AI 选片、找杂物、对话改图的模型改成下拉列表，列出 Magpie「视觉修图」组里的全部模型（Claude 会标出来）
+- 去掉了「省钱 / 推荐 / 效果优先」和 App 自己的出错换模型，统一交给 Magpie 的「视觉修图」组按顺序切换
+- 设置页显示最近 7 天实际用到的模型；对话改图的每张结果卡片显示这次是哪个模型回答的
+]]></description>
+            <enclosure url="https://github.com/fulisadawang/aiphoto/releases/download/v0.9.0/AIPhoto-0.9.0.zip" length="5729481" type="application/octet-stream" sparkle:edSignature="ku2qtxYk2sHCIQz6nFbZOHngYZfmpaLARZ6bAu2ldUPrBKETDZCi/EROuqvR0fVV/C1LlyR8+UpIbacWcHmcCA=="/>
+        </item>
+        <item>
             <title>0.8.4</title>
             <pubDate>Tue, 20 Oct 2026 23:14:12 +0800</pubDate>
             <sparkle:version>13</sparkle:version>
@@ -32,21 +56,6 @@
 - 左侧分组列表里，排队中的组显示时钟，正在评估的组显示转圈
 ]]></description>
             <enclosure url="https://github.com/fulisadawang/aiphoto/releases/download/v0.8.3/AIPhoto-0.8.3.zip" length="5682083" type="application/octet-stream" sparkle:edSignature="SknPoA4KCf9ja+5qiCQqqEOO52R3zXo+xvDMwPTIC6nF7PDryPqQKS9xXIaOSu1BhZ8FGh78TWv+MCGZUliFAA=="/>
-        </item>
-        <item>
-            <title>0.8.2</title>
-            <pubDate>Tue, 20 Oct 2026 22:22:36 +0800</pubDate>
-            <sparkle:version>11</sparkle:version>
-            <sparkle:shortVersionString>0.8.2</sparkle:shortVersionString>
-            <sparkle:minimumSystemVersion>15.0</sparkle:minimumSystemVersion>
-            <sparkle:hardwareRequirements>arm64</sparkle:hardwareRequirements>
-            <description sparkle:format="markdown"><![CDATA[## 改进
-
-- Dock 和访达里显示的名字改为「小宇专属」
-- 点左上角关闭只关窗口，App 留在 Dock 里；点 Dock 图标重新打开，选片进度和撤销记录都还在
-- 设置里的接口地址可以填任意 http 地址（局域网其他电脑、域名都可以）
-]]></description>
-            <enclosure url="https://github.com/fulisadawang/aiphoto/releases/download/v0.8.2/AIPhoto-0.8.2.zip" length="5665909" type="application/octet-stream" sparkle:edSignature="XP9Od876XKXv3xaOpp0VrUa2/tXaaY38FbNbcXCZLs4CmtZX/Yvzkp2gzXSnY2kFtISC55wlifvHFlY5gi6nBw=="/>
         </item>
     </channel>
 </rss>
