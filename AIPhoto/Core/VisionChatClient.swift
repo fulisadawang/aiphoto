@@ -1,5 +1,38 @@
 import Foundation
 
+/// 看图、画图请求共用：单个请求超过 3 分钟还没完成就放弃（用户 2026-10-21 要求），
+/// 原来等 5 分钟，Magpie 组里换几次模型就像卡死
+enum AIRequest {
+    static let timeout: TimeInterval = 180
+
+    static let session: URLSession = {
+        let config = URLSessionConfiguration.default
+        config.timeoutIntervalForRequest = timeout
+        // 从发出到收完的总时长上限；只设 timeoutIntervalForRequest 时只要还在陆续收到数据就会一直等
+        config.timeoutIntervalForResource = timeout
+        return URLSession(configuration: config)
+    }()
+
+    struct TimedOut: LocalizedError {
+        var errorDescription: String? { "超过 3 分钟没有回应，已放弃" }
+    }
+
+    static func data(for request: URLRequest) async throws -> (Data, URLResponse) {
+        var request = request
+        request.timeoutInterval = timeout
+        do {
+            return try await session.data(for: request)
+        } catch let error as URLError where error.code == .timedOut {
+            throw TimedOut()
+        }
+    }
+
+    /// 用户点了取消：不算失败，不提示错误
+    static func isCancellation(_ error: Error) -> Bool {
+        error is CancellationError || (error as? URLError)?.code == .cancelled
+    }
+}
+
 /// OpenAI 兼容的 /chat/completions 看图对话接口（如本机 Magpie）
 struct VisionChatClient {
     var baseURL: URL
@@ -40,7 +73,6 @@ struct VisionChatClient {
         }
         var request = URLRequest(url: baseURL.appendingPathComponent("chat/completions"))
         request.httpMethod = "POST"
-        request.timeoutInterval = 300
         request.setValue("application/json", forHTTPHeaderField: "content-type")
         // Magpie 按程序名区分调用方，用量统计靠它筛出本 App 的请求
         request.setValue(MagpieUsage.userAgent, forHTTPHeaderField: "User-Agent")
@@ -54,7 +86,7 @@ struct VisionChatClient {
             "response_format": ["type": "json_object"],
         ] as [String: Any])
 
-        let (data, response) = try await URLSession.shared.data(for: request)
+        let (data, response) = try await AIRequest.data(for: request)
         let status = (response as? HTTPURLResponse)?.statusCode ?? 0
         guard status == 200 else {
             // 错误响应不一定是 JSON，解析不了就原样展示

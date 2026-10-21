@@ -53,11 +53,7 @@ struct FilmstripCell: View {
             }
             .overlay(alignment: .bottomLeading) {
                 HStack(spacing: 3) {
-                    if model.isCleaning(photo.id) {
-                        Text("修复中").badgeStyle(.blue)
-                    } else if photo.retouchLog?.needsReview == true {
-                        Text("需检查").badgeStyle(.pink)
-                    }
+                    RetouchBadge(photo: photo)
                     // 只修图时不显示选片提示
                     ForEach(model.showsCullingHints ? photo.flags.sorted { $0.rawValue < $1.rawValue } : [], id: \.self) { flag in
                         Text(flag.label).badgeStyle(.orange)

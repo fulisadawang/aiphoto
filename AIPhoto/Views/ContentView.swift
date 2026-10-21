@@ -129,7 +129,7 @@ struct ContentView: View {
                     } label: {
                         Label("一键初修", systemImage: "paintpalette")
                     }
-                    .disabled(model.pickedCount == 0 || model.retouchProgress != nil)
+                    .disabled(model.pickedCount == 0 || model.retouchRun != nil)
                     .help("对所有已选照片全自动初修：调色、皮肤轻度柔化、去背景杂物，完成后给出总结")
                 }
 
@@ -139,7 +139,7 @@ struct ContentView: View {
                     } label: {
                         Label("一键去杂物", systemImage: "eraser")
                     }
-                    .disabled(model.pickedCount == 0 || model.retouchProgress != nil)
+                    .disabled(model.pickedCount == 0 || model.retouchRun != nil)
                     .help("对所有已选照片去掉路人、垃圾、杂物；不调色、不磨皮")
                 }
 
@@ -219,26 +219,22 @@ struct StatusBar: View {
                     .controlSize(.small)
                     .help("停止 AI 选片，已完成的结果保留（⌘.）")
                 }
-            } else if !model.groups.isEmpty {
+            } else if !model.groups.isEmpty, model.retouchRun == nil, model.cleanupJobs.isEmpty {
+                // 后台在修图时让出位置给进度，快捷键提示会把进度挤成好几行
                 Text(model.shootMode == .editOnly
                      ? "← → 切换照片　空格 放大人脸　F 人脸框　A 自动调色　\\ 修复前后对比　B 画笔去杂物　Z 缩放　K 合焦高亮　J 过曝提示"
                      : "← → 切换照片　↑ ↓ 切换组　P 选用　X 淘汰　U 取消　1-5 星级　空格 放大人脸　F 人脸框　A 自动调色　\\ 修复前后对比　B 画笔去杂物　Z 缩放　K 合焦高亮　J 过曝提示　G 网格总览")
                     .foregroundStyle(.secondary)
             }
             Spacer()
-            if let progress = model.retouchProgress {
-                HStack(spacing: 6) {
-                    ProgressView(value: Double(progress.done), total: Double(max(1, progress.total)))
-                        .frame(width: 100)
-                    Text("初修 \(progress.done)/\(progress.total)")
-                        .monospacedDigit()
-                }
-            }
-            if !model.cleanupJobs.isEmpty {
+            if let run = model.retouchRun {
+                RetouchRunStatus(run: run)
+            } else if !model.cleanupJobs.isEmpty {
                 let running = model.cleanupJobs.filter(\.isRunning).count
                 HStack(spacing: 6) {
                     ProgressView().controlSize(.small)
                     Text("去杂物：进行中 \(running) · 排队 \(model.cleanupJobs.count - running)")
+                    WorkingPhotosMenu()
                 }
             }
             if !model.photos.isEmpty {
@@ -250,6 +246,80 @@ struct StatusBar: View {
         .padding(.horizontal, 12)
         .padding(.vertical, 6)
     }
+}
+
+/// 一键初修进行中：现在在做哪一步、已用多久、正在修哪几张，可以取消
+private struct RetouchRunStatus: View {
+    @Environment(AppModel.self) private var model
+    let run: AppModel.RetouchRun
+
+    var body: some View {
+        TimelineView(.periodic(from: .now, by: 1)) { context in
+            HStack(spacing: 6) {
+                ProgressView().controlSize(.small)
+                Text(text(now: context.date))
+                    .monospacedDigit()
+                    .lineLimit(1)
+                WorkingPhotosMenu()
+                Button {
+                    model.cancelRetouch()
+                } label: {
+                    Label(run.cancelling ? "正在取消…" : "取消", systemImage: "xmark.circle.fill")
+                }
+                .controlSize(.small)
+                .disabled(run.cancelling)
+                .help("停止\(model.lastBatchOnlyCleanup ? "一键去杂物" : "一键初修")：已修好的保留，正在等的请求立即中断，排队的不再做")
+            }
+        }
+    }
+
+    private func text(now: Date) -> String {
+        var parts = [model.lastBatchOnlyCleanup ? "一键去杂物" : "一键初修"]
+        switch run.stage {
+        case .coloring(let title):
+            parts.append(title)
+        case .locating, .cleaning:
+            parts.append("找杂物 \(run.located)/\(run.total)")
+            if run.jobs > 0 { parts.append("去杂物 \(run.jobsEnded)/\(run.jobs)") }
+        }
+        parts.append("已用 " + elapsedText(since: run.start, now: now))
+        // 单处等得久时说清楚还在等、最多等多久，免得以为卡死
+        if let oldest = model.cleanupJobs.compactMap(\.startedAt).min(), now.timeIntervalSince(oldest) >= 60 {
+            parts.append("有一处已等 \(elapsedText(since: oldest, now: now))，超过 3 分钟自动放弃")
+        }
+        return parts.joined(separator: " · ")
+    }
+}
+
+/// 「正在修 N 张」：列出正在找杂物、去杂物的照片，点一下跳过去看
+private struct WorkingPhotosMenu: View {
+    @Environment(AppModel.self) private var model
+
+    var body: some View {
+        let ids = model.workingPhotoIDs
+        if !ids.isEmpty {
+            Menu("正在修 \(ids.count) 张") {
+                ForEach(ids, id: \.self) { id in
+                    Button {
+                        model.selectPhoto(id)
+                    } label: {
+                        Text((model.photos[id]?.fileName ?? id) + (model.locatingPhotoIDs.contains(id) ? "（找杂物）" : "（去杂物）"))
+                    }
+                }
+            }
+            .menuStyle(.button)
+            .buttonStyle(.bordered)
+            .controlSize(.small)
+            .fixedSize()
+            .help("点照片名跳到那张")
+        }
+    }
+}
+
+/// 已等多久：「35 秒」「2 分 05 秒」
+func elapsedText(since start: Date, now: Date) -> String {
+    let seconds = max(0, Int(now.timeIntervalSince(start)))
+    return seconds < 60 ? "\(seconds) 秒" : String(format: "%d 分 %02d 秒", seconds / 60, seconds % 60)
 }
 
 struct WelcomeView: View {

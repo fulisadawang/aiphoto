@@ -12,7 +12,8 @@ struct ChatPanel: View {
     private static let suggestions = ["再亮一点", "暖一点", "天空蓝一点", "去掉路人"]
 
     private var messages: [ChatMessage] { photo.chat ?? [] }
-    private var isThinking: Bool { model.chattingPhotoIDs.contains(photo.id) }
+    private var thinking: AppModel.ChatThinking? { model.chatThinking[photo.id] }
+    private var isThinking: Bool { thinking != nil }
     /// 只有最新一张结果卡片能撤销，与 ⌘Z 一步步往回撤一致
     private var latestStepID: UUID? { messages.last { $0.step != nil }?.id }
     private var currentModel: String { model.chatModelOverride ?? ModelCatalog.model(for: .chat) }
@@ -26,8 +27,8 @@ struct ChatPanel: View {
                     LazyVStack(alignment: .leading, spacing: 10) {
                         if messages.isEmpty { hint }
                         ForEach(messages) { message($0).id($0.id) }
-                        if isThinking {
-                            statusRow("正在理解你的意思…")
+                        if let thinking {
+                            thinkingRow(thinking)
                         }
                         Color.clear.frame(height: 1).id("bottom")
                     }
@@ -170,10 +171,23 @@ struct ChatPanel: View {
         }
     }
 
-    private func statusRow(_ text: String) -> some View {
-        HStack(spacing: 6) {
-            ProgressView().controlSize(.small)
-            Text(text).font(.caption).foregroundStyle(.secondary)
+    /// 正在做哪一步、已等多久；超过 3 分钟请求会自动放弃（AIRequest.timeout）
+    private func thinkingRow(_ thinking: AppModel.ChatThinking) -> some View {
+        TimelineView(.periodic(from: .now, by: 1)) { context in
+            HStack(alignment: .firstTextBaseline, spacing: 6) {
+                ProgressView().controlSize(.small)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(thinking.stage).font(.caption)
+                    Text("已等 \(elapsedText(since: thinking.start, now: context.date)) · 一步超过 3 分钟会自动放弃")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                        .monospacedDigit()
+                }
+                Spacer(minLength: 4)
+                Button("取消") { model.cancelChat(photo.id) }
+                    .controlSize(.small)
+                    .help("不等了，这句话不执行，照片不改动")
+            }
         }
     }
 
@@ -268,12 +282,7 @@ private struct ResultCard: View {
                     .foregroundStyle(claude ? Color.red : Color.secondary)
             }
             if step.pending > 0, !step.undone {
-                HStack(spacing: 6) {
-                    ProgressView().controlSize(.mini)
-                    Text("后台处理中，约 30 秒一处，可以继续说或看别的照片")
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
-                }
+                jobProgress
             }
             if !step.undone {
                 HStack(spacing: 6) {
@@ -301,6 +310,38 @@ private struct ResultCard: View {
         .opacity(step.undone ? 0.55 : 1)
     }
 
+    /// 后台去除 / 重画：排队还是在画、已等多久，可以停止
+    private var jobProgress: some View {
+        let jobs = model.chatJobs(message.id)
+        return TimelineView(.periodic(from: .now, by: 1)) { context in
+            HStack(alignment: .firstTextBaseline, spacing: 6) {
+                ProgressView().controlSize(.mini)
+                Text(jobText(jobs, now: context.date))
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .monospacedDigit()
+                    .fixedSize(horizontal: false, vertical: true)
+                Spacer(minLength: 4)
+                if !jobs.isEmpty {
+                    Button("停止") { model.stopChatJobs(message.id) }
+                        .controlSize(.mini)
+                        .help("还没做完的不做了，已完成的保留")
+                }
+            }
+        }
+    }
+
+    private func jobText(_ jobs: [AppModel.CleanupJob], now: Date) -> String {
+        if let started = jobs.compactMap(\.startedAt).min() {
+            return "正在画，已等 \(elapsedText(since: started, now: now))（一般 30 秒左右，超过 3 分钟自动放弃）"
+        }
+        guard let first = jobs.first, let index = model.cleanupJobs.firstIndex(where: { $0.id == first.id }) else {
+            return "后台处理中"
+        }
+        let ahead = model.cleanupJobs[..<index].filter { !$0.isRunning }.count
+        return ahead > 0 ? "排队中，前面还有 \(ahead) 处" : "马上开始，等前面正在画的完成"
+    }
+
     private var title: String {
         if step.undone { return "已撤销" }
         var parts: [String] = []
@@ -308,10 +349,11 @@ private struct ResultCard: View {
         if step.jobs > 0 {
             if step.pending > 0 {
                 parts.append("正在处理 \(step.pending) 处")
-            } else if step.failed > 0 {
-                parts.append("完成 \(step.finished) 处，失败 \(step.failed) 处")
             } else {
-                parts.append("已完成 \(step.finished) 处")
+                var result = ["完成 \(step.finished) 处"]
+                if step.failed > 0 { result.append("失败 \(step.failed) 处") }
+                if let stopped = step.stopped, stopped > 0 { result.append("停止 \(stopped) 处") }
+                parts.append(result.count == 1 ? "已完成 \(step.finished) 处" : result.joined(separator: "，"))
             }
         }
         return parts.joined(separator: " · ")

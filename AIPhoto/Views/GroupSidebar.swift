@@ -29,8 +29,8 @@ struct GroupSidebar: View {
                         Thumbnail(url: photo.displayURL, size: CGSize(width: 64, height: 48))
                         VStack(alignment: .leading, spacing: 3) {
                             Text(photo.fileName).fontWeight(.medium)
-                            if model.isCleaning(photo.id) {
-                                Text("修复中").font(.caption).foregroundStyle(.blue)
+                            if model.isCleaning(photo.id) || photo.retouchLog != nil {
+                                RetouchBadge(photo: photo)
                             } else if photo.edit != nil || photo.cleanups != nil {
                                 Text("已修").font(.caption).foregroundStyle(.secondary)
                             }
@@ -108,9 +108,29 @@ struct GroupRow: View {
                 Text(picked > 0 ? "\(members.count) 张 · 选 \(picked)" : "\(members.count) 张")
                     .font(.caption)
                     .foregroundStyle(.secondary)
+                retouchSummary(members)
             }
         }
         .padding(.vertical, 2)
+    }
+
+    /// 这一组正在修几张、初修完几张，不用点开组也能看到
+    @ViewBuilder
+    private func retouchSummary(_ members: [Photo]) -> some View {
+        let working = members.filter { model.isCleaning($0.id) }.count
+        let retouched = members.filter { $0.retouchLog != nil && !model.isCleaning($0.id) }.count
+        if working > 0 || retouched > 0 {
+            HStack(spacing: 6) {
+                if working > 0 {
+                    Label("修复中 \(working)", systemImage: "hourglass").foregroundStyle(.blue)
+                }
+                if retouched > 0 {
+                    Label("已初修 \(retouched)", systemImage: "checkmark.seal.fill").foregroundStyle(.teal)
+                }
+            }
+            .font(.caption)
+            .labelStyle(.titleAndIcon)
+        }
     }
 }
 

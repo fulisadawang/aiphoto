@@ -133,13 +133,12 @@ struct OpenAICompatibleInpainter: InpaintProvider {
 
         var request = URLRequest(url: baseURL.appendingPathComponent("images/edits"))
         request.httpMethod = "POST"
-        request.timeoutInterval = 300
         request.setValue("multipart/form-data; boundary=\(boundary)", forHTTPHeaderField: "Content-Type")
         request.setValue(MagpieUsage.userAgent, forHTTPHeaderField: "User-Agent")
         if !apiKey.isEmpty { request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization") }
         request.httpBody = body
 
-        let (data, response) = try await URLSession.shared.data(for: request)
+        let (data, response) = try await AIRequest.data(for: request)
         let status = (response as? HTTPURLResponse)?.statusCode ?? 0
         // 错误响应不一定是 JSON，解析不了就原样展示
         let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
@@ -153,7 +152,7 @@ struct OpenAICompatibleInpainter: InpaintProvider {
         if let base64 = first["b64_json"] as? String, let decoded = Data(base64Encoded: base64) {
             imageBytes = decoded
         } else if let urlText = first["url"] as? String, let url = URL(string: urlText) {
-            imageBytes = try await URLSession.shared.data(from: url).0
+            imageBytes = try await AIRequest.data(for: URLRequest(url: url)).0
         } else {
             throw InpaintError.noImage
         }

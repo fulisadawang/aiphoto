@@ -33,8 +33,10 @@ struct ChatStep: Codable, Equatable {
     /// Magpie 实际用来理解这句话的模型；旧记录没有
     var model: String?
     var undone = false
+    /// 摄影师点「停止」时还没做完的处数；旧记录没有
+    var stopped: Int?
 
-    var pending: Int { max(0, jobs - finished - failed) }
+    var pending: Int { max(0, jobs - finished - failed - (stopped ?? 0)) }
 }
 
 /// 对话改图：把摄影师的一句话交给看图模型，换算成调色参数、要去掉的物体和要重画的区域

@@ -109,7 +109,34 @@ final class AppModel {
         var fromChat = false
         /// 对话里对应的结果卡片
         var chatMessageID: UUID? = nil
+        /// 一键初修 / 一键去杂物交给后台的：底部按本轮统计进度，取消时一起停
+        var batch = false
         var isRunning = false
+        /// 开始请求的时间：底部和对话卡片显示已等多久
+        var startedAt: Date?
+    }
+
+    /// 一键初修 / 一键去杂物的进度，底部状态栏显示
+    struct RetouchRun {
+        enum Stage {
+            case coloring(String), locating, cleaning
+        }
+
+        let total: Int
+        let start = Date()
+        var stage: Stage = .locating
+        /// 已找完杂物的张数
+        var located = 0
+        /// 本轮交给后台去杂物的处数，以及已结束（完成或失败）的处数
+        var jobs = 0
+        var jobsEnded = 0
+        var cancelling = false
+    }
+
+    /// 对话改图正在理解指令：当前在做哪一步、从什么时候开始等
+    struct ChatThinking {
+        var stage: String
+        let start = Date()
     }
 
     var cleanupJobs: [CleanupJob] = []
@@ -133,9 +160,15 @@ final class AppModel {
     var composite: CompositeSession?
     var showCompositePicker = false
     /// 正在等模型理解指令的照片
-    var chattingPhotoIDs: Set<String> = []
-    /// 一键初修进度：已处理 / 总数；nil 表示没有在初修
-    var retouchProgress: (done: Int, total: Int)?
+    var chatThinking: [String: ChatThinking] = [:]
+    private var chatTasks: [String: Task<Void, Never>] = [:]
+    /// 一键初修进度；nil 表示没有在初修
+    var retouchRun: RetouchRun?
+    private var retouchTask: Task<Void, Never>?
+    /// 最近一次一键初修是中途取消的（总结里说明）
+    var lastRetouchCancelled = false
+    /// 正在请求的去杂物任务，取消时用
+    private var cleanupTasks: [UUID: Task<Void, Never>] = [:]
     var showRetouchSummary = false
     var showRetouchStart = false
     var showCleanupStart = false
@@ -248,7 +281,7 @@ final class AppModel {
         cleanupJobs = []
         cleanupFailures = []
         locatingPhotoIDs = []
-        retouchProgress = nil
+        retouchRun = nil
         perform("正在扫描文件夹…") {
             let scanned = await Task.detached { PhotoScanner.scan(folder: folder) }.value
             guard !scanned.isEmpty else {
@@ -822,13 +855,25 @@ final class AppModel {
         strokes = []
     }
 
-    func enqueueCleanup(photoID: String, strokes: [BrushStroke], itemName: String?, isLarge: Bool) {
-        cleanupJobs.append(CleanupJob(photoID: photoID, strokes: strokes, itemName: itemName, isLarge: isLarge))
+    func enqueueCleanup(photoID: String, strokes: [BrushStroke], itemName: String?, isLarge: Bool, batch: Bool = false) {
+        cleanupJobs.append(CleanupJob(photoID: photoID, strokes: strokes, itemName: itemName, isLarge: isLarge, batch: batch))
+        if batch { retouchRun?.jobs += 1 }
         pumpCleanupQueue()
     }
 
     func isCleaning(_ photoID: String) -> Bool {
         locatingPhotoIDs.contains(photoID) || cleanupJobs.contains { $0.photoID == photoID }
+    }
+
+    /// 正在找杂物或正在去杂物的照片（不含只是排队的），底部「正在修」列出
+    var workingPhotoIDs: [String] {
+        let running = cleanupJobs.filter(\.isRunning).map(\.photoID)
+        return Array(locatingPhotoIDs.union(running)).sorted()
+    }
+
+    /// 在找杂物或去杂物，而不只是排队
+    func isWorking(_ photoID: String) -> Bool {
+        locatingPhotoIDs.contains(photoID) || cleanupJobs.contains { $0.isRunning && $0.photoID == photoID }
     }
 
     // MARK: - 一键去干扰物 / 一键初修
@@ -846,7 +891,7 @@ final class AppModel {
     private static let largeAreaThreshold: CGFloat = 0.04
 
     @discardableResult
-    private func locateAndRemove(photoID: String, client: VisionChatClient) async -> Bool {
+    private func locateAndRemove(photoID: String, client: VisionChatClient, batch: Bool = false) async -> Bool {
         guard let photo = photos[photoID] else { return false }
         let url = photo.displayURL, hints = photo.ai?.distractions ?? [], note = photo.retouchNote
         locatingPhotoIDs.insert(photoID)
@@ -864,7 +909,8 @@ final class AppModel {
                         photoID: photoID,
                         strokes: DistractionLocator.strokes(covering: item.box, imageAspect: aspect),
                         itemName: item.name,
-                        isLarge: item.box.width * item.box.height > Self.largeAreaThreshold
+                        isLarge: item.box.width * item.box.height > Self.largeAreaThreshold,
+                        batch: batch
                     )
                 } else {
                     appendLog(photoID) { $0.kept.append(item.name) }
@@ -876,7 +922,8 @@ final class AppModel {
             scheduleSave()
             return true
         } catch {
-            appendLog(photoID) { $0.warnings.append("识别干扰物失败：\(error.localizedDescription)") }
+            let cancelled = AIRequest.isCancellation(error)
+            appendLog(photoID) { $0.warnings.append(cancelled ? "已取消，没有识别干扰物" : "识别干扰物失败：\(error.localizedDescription)") }
             scheduleSave()
             return false
         }
@@ -890,7 +937,7 @@ final class AppModel {
             return
         }
         let preset = presets.first { $0.id == presetID }
-        Task { await runQuickRetouch(targets, preset: preset, note: note.trimmingCharacters(in: .whitespacesAndNewlines)) }
+        retouchTask = Task { await runQuickRetouch(targets, preset: preset, note: note.trimmingCharacters(in: .whitespacesAndNewlines)) }
     }
 
     /// 一键去杂物（自己选片时用）：只让 AI 找出路人、垃圾、杂物并去掉，不调色、不磨皮
@@ -900,7 +947,7 @@ final class AppModel {
             alert = AlertInfo(title: "还没有已选照片", message: "先选用照片（P），再一键去杂物。")
             return
         }
-        Task { await runQuickRetouch(targets, preset: nil, note: "", onlyCleanup: true) }
+        retouchTask = Task { await runQuickRetouch(targets, preset: nil, note: "", onlyCleanup: true) }
     }
 
     private func runQuickRetouch(_ targets: [Photo], preset: RetouchPreset?, note: String, onlyCleanup: Bool = false) async {
@@ -908,22 +955,23 @@ final class AppModel {
         lastBatchOnlyCleanup = onlyCleanup
         recordUndo(.edit, ids: targets.map(\.id), label: onlyCleanup ? "一键去杂物" : "一键初修")
         for photo in targets { photos[photo.id]?.retouchLog = RetouchLog() }
-        retouchProgress = (0, targets.count)
+        retouchRun = RetouchRun(total: targets.count)
+        lastRetouchCancelled = false
         lastLookSummary = nil
         let retouchStart = Date()
         lastRetouchWindow = nil
         // 选了预设或写了诉求：所有照片按预设重新调色（用户确认，手动修过的也重做，可撤销）；否则沿用原来的自动调色
         let usesPreset = preset != nil || !note.isEmpty
         if usesPreset, !onlyCleanup {
-            statusText = note.isEmpty ? "按预设调色中…" : "AI 正在理解本场诉求…"
+            retouchRun?.stage = .coloring(note.isEmpty ? "按预设调色" : "AI 正在理解本场诉求")
             await recolor(targets.map(\.id), preset: preset, note: note)
-            statusText = ""
+            retouchRun?.stage = .locating
         }
 
         await withTaskGroup(of: Void.self) { group in
             var next = 0
             func enqueue() {
-                guard next < targets.count else { return }
+                guard next < targets.count, !Task.isCancelled else { return }
                 let photo = targets[next]
                 next += 1
                 // 一键去杂物不调色：adjustsColor 为 false 时只记录问题并去杂物
@@ -932,16 +980,41 @@ final class AppModel {
             // 每张要调用看图模型定位干扰物，并发 3 个
             for _ in 0..<min(3, targets.count) { enqueue() }
             for await _ in group {
-                if let progress = retouchProgress { retouchProgress = (progress.done + 1, progress.total) }
+                retouchRun?.located += 1
                 enqueue()
+            }
+            // 中途取消：还没轮到的照片在总结里写明
+            for photo in targets[next...] {
+                appendLog(photo.id) { $0.warnings.append("已取消，这张没有处理") }
             }
         }
         scheduleSave()
-        // 去杂物还在后台排队时，等它们做完再弹总结
-        while !cleanupJobs.isEmpty { try? await Task.sleep(for: .seconds(1)) }
-        retouchProgress = nil
+        retouchRun?.stage = .cleaning
+        // 只等本轮交出去的去杂物；每处最多 3 分钟（AIRequest.timeout），不会无限等
+        while !Task.isCancelled, cleanupJobs.contains(where: \.batch) {
+            try? await Task.sleep(for: .seconds(1))
+        }
+        lastRetouchCancelled = Task.isCancelled
+        retouchRun = nil
+        retouchTask = nil
         lastRetouchWindow = (retouchStart, Date())
         showRetouchSummary = true
+    }
+
+    /// 取消一键初修：已完成的保留，正在发的请求立即中断，排队的不再做
+    func cancelRetouch() {
+        guard retouchRun != nil else { return }
+        retouchRun?.cancelling = true
+        retouchTask?.cancel()
+        for job in cleanupJobs where job.batch {
+            cleanupTasks[job.id]?.cancel()
+            if let item = job.itemName {
+                appendLog(job.photoID) { $0.warnings.append("已取消，没有去掉\(item)") }
+            }
+        }
+        cleanupJobs.removeAll(where: \.batch)
+        pumpCleanupQueue()
+        scheduleSave()
     }
 
     /// adjustsColor 为 false 时调色已由 recolor 按预设统一做过，这里只去杂物
@@ -964,7 +1037,7 @@ final class AppModel {
         // 初修修不了的问题：来自本地检测和 AI 选片
         let unfixable = photo.flags.map { "\($0.label)，初修无法修复" } + (photo.ai?.issues ?? [])
         if !unfixable.isEmpty { appendLog(photo.id) { $0.unfixable.append(contentsOf: unfixable) } }
-        await locateAndRemove(photoID: photo.id, client: client)
+        await locateAndRemove(photoID: photo.id, client: client, batch: true)
     }
 
     private static func describe(_ edit: EditSettings, presetName: String?) -> [String] {
@@ -983,14 +1056,20 @@ final class AppModel {
     /// 同一张照片的任务按顺序做（后一次要叠在前一次的结果上），不同照片可以并行
     func pumpCleanupQueue() {
         guard let folder = folderURL else { return }
-        while cleanupJobs.filter(\.isRunning).count < Self.cleanupConcurrency,
-              let index = cleanupJobs.firstIndex(where: { job in
-                  !job.isRunning && !cleanupJobs.contains { $0.isRunning && $0.photoID == job.photoID }
-              }) {
+        while let index = cleanupJobs.firstIndex(where: { job in
+            !job.isRunning && canStart(job) && !cleanupJobs.contains { $0.isRunning && $0.photoID == job.photoID }
+        }) {
             cleanupJobs[index].isRunning = true
+            cleanupJobs[index].startedAt = Date()
             let job = cleanupJobs[index]
-            Task { await runCleanupJob(job, folder: folder) }
+            cleanupTasks[job.id] = Task { await runCleanupJob(job, folder: folder) }
         }
+    }
+
+    /// 对话改图是摄影师正在等的：多给一个名额，不用等一键初修排着的去杂物
+    private func canStart(_ job: CleanupJob) -> Bool {
+        let running = cleanupJobs.filter(\.isRunning).count
+        return running < Self.cleanupConcurrency + (job.fromChat ? 1 : 0)
     }
 
     private func runCleanupJob(_ job: CleanupJob, folder: URL) async {
@@ -1005,7 +1084,11 @@ final class AppModel {
         } catch {
             outcome = .failure(error)
         }
+        cleanupTasks[job.id] = nil
+        // 用户取消了（一键初修取消、对话卡片停止）：已在取消时处理，结果不再贴上
+        if Task.isCancelled { return }
         cleanupJobs.removeAll { $0.id == job.id }
+        if job.batch { retouchRun?.jobsEnded += 1 }
         // 等待期间换了文件夹：结果属于旧文件夹，丢弃（修补文件留在旧文件夹，下次打开时清理）
         guard folderURL == folder, photos[job.photoID] != nil else { return }
 
@@ -1186,13 +1269,16 @@ final class AppModel {
     /// 摄影师对当前照片说一句话：调色立即生效，去除和重画进后台队列，完成后回写到对话里
     func sendChat(_ text: String) {
         let instruction = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !instruction.isEmpty, let id = selectedPhotoID, let folder = folderURL, !chattingPhotoIDs.contains(id) else { return }
+        guard !instruction.isEmpty, let id = selectedPhotoID, let folder = folderURL, chatThinking[id] == nil else { return }
         let history = photos[id]?.chat ?? []
         appendChat(id, ChatMessage(role: .user, text: instruction))
         scheduleSave()
-        chattingPhotoIDs.insert(id)
-        Task {
-            defer { chattingPhotoIDs.remove(id) }
+        chatThinking[id] = ChatThinking(stage: "正在理解你的意思…")
+        chatTasks[id] = Task {
+            defer {
+                chatThinking[id] = nil
+                chatTasks[id] = nil
+            }
             guard let client = await makeVisionClient(use: .chat, model: chatModelOverride, purpose: .chat) else {
                 appendChat(id, ChatMessage(role: .assistant, text: "看图模型的设置有问题，没有执行。", isError: true))
                 return
@@ -1207,7 +1293,11 @@ final class AppModel {
                 // 去除和重画先校正位置，确认不到的不执行
                 let faces = photo.analysis?.faces.map(\.box) ?? []
                 var targets: [ChatEditor.Target] = [], missing: [String] = []
-                for target in plan.remove + plan.redraw {
+                let toResolve = plan.remove + plan.redraw
+                for (index, target) in toResolve.enumerated() {
+                    chatThinking[id]?.stage = toResolve.count > 1
+                        ? "正在放大确认「\(target.name)」的位置（\(index + 1)/\(toResolve.count)）…"
+                        : "正在放大确认「\(target.name)」的位置…"
                     if let box = try await editor.resolve(target, in: preview, faces: faces) {
                         targets.append(ChatEditor.Target(name: target.name, box: box, prompt: target.prompt, isFace: target.isFace))
                     } else {
@@ -1216,13 +1306,39 @@ final class AppModel {
                 }
                 // 等待期间换了文件夹或照片被移除：丢弃结果
                 guard folderURL == folder, photos[id] != nil else { return }
+                try Task.checkCancellation()
                 let aspect = CGFloat(preview.width) / CGFloat(preview.height)
                 applyChatPlan(plan, targets: targets, missing: missing, photoID: id, instruction: instruction, imageAspect: aspect)
+            } catch where AIRequest.isCancellation(error) {
+                appendChat(id, ChatMessage(role: .assistant, text: "已取消这次修改，照片没有改动。"))
             } catch {
                 appendChat(id, ChatMessage(role: .assistant, text: "没能完成：\(error.localizedDescription)", isError: true))
             }
             scheduleSave()
         }
+    }
+
+    /// 取消正在理解的对话指令：请求立即中断，照片不改动
+    func cancelChat(_ photoID: String) {
+        chatThinking[photoID]?.stage = "正在取消…"
+        chatTasks[photoID]?.cancel()
+    }
+
+    /// 一张结果卡片交给后台的任务
+    func chatJobs(_ messageID: UUID) -> [CleanupJob] {
+        cleanupJobs.filter { $0.chatMessageID == messageID }
+    }
+
+    /// 停止卡片上还没做完的去除 / 重画：已完成的保留
+    func stopChatJobs(_ messageID: UUID) {
+        guard let id = selectedPhotoID else { return }
+        let jobs = chatJobs(messageID)
+        guard !jobs.isEmpty else { return }
+        for job in jobs { cleanupTasks[job.id]?.cancel() }
+        cleanupJobs.removeAll { $0.chatMessageID == messageID }
+        updateChatStep(id, messageID) { $0.stopped = ($0.stopped ?? 0) + jobs.count }
+        pumpCleanupQueue()
+        scheduleSave()
     }
 
     /// 给模型看的当前效果：缩小的预览叠上去杂物和调色
@@ -1267,7 +1383,9 @@ final class AppModel {
                     continue
                 }
             }
-            cleanupJobs.append(CleanupJob(
+            // 插到排队的一键初修任务前面：摄影师正盯着这张等结果
+            let position = cleanupJobs.firstIndex { !$0.isRunning && !$0.fromChat } ?? cleanupJobs.endIndex
+            cleanupJobs.insert(CleanupJob(
                 photoID: id,
                 strokes: strokes,
                 itemName: target.name,
@@ -1275,7 +1393,7 @@ final class AppModel {
                 prompt: target.prompt.map(ChatEditor.redrawPrompt),
                 fromChat: true,
                 chatMessageID: messageID
-            ))
+            ), at: position)
             step.jobs += 1
             step.changes.append((target.prompt == nil ? "去掉：" : "重画：") + target.name)
         }

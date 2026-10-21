@@ -80,7 +80,8 @@ struct RetouchSummaryView: View {
 
         VStack(alignment: .leading, spacing: 0) {
             HStack {
-                Text("\(model.lastBatchOnlyCleanup ? "去杂物完成" : "初修完成")：\(logged.count) 张").font(.title3.bold())
+                Text("\(model.lastBatchOnlyCleanup ? "去杂物" : "初修")\(model.lastRetouchCancelled ? "已中途取消" : "完成")：\(logged.count) 张")
+                    .font(.title3.bold())
                 Spacer()
                 Button("关闭") { dismiss() }.keyboardShortcut(.cancelAction)
             }

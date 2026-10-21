@@ -59,6 +59,7 @@ App 显示名为「小宇专属」（2026-10-20 用户改名）。显示名来�
 - **后台去杂物队列**：`enqueueCleanup` 排队，最多 2 个并发，同一张照片的任务按顺序执行（后一次叠加在前一次结果上）；不使用 `perform`/`isBusy`，不占住界面。失败在队列清空时统一提示。
 - **可取消的忙碌任务**：`perform(_:cancellable:)` 记下任务，`cancelBusy()` 取消（状态栏「取消」按钮、菜单 ⌘.）；目前只有 AI 选片可取消。取消时已完成批次的结果保留，请求立即中断、不再换模型重试。进度按张数算在 `AppModel.aiRun`，侧栏据此标出排队中 / 评估中的组。
 - **处理方式**（`ShootMode`，需求清单第 17 节）：每次打开文件夹先弹 `ShootModeSheet` 问「AI 选片 / 自己选片 / 已选好，只修图」，入口统一走 `AppModel.requestOpen`（打开面板、拖到窗口、Dock / `open` 命令），方式存在 `session.json` 的 `mode`。只有 AI 选片会自动预选（`applyAutoDecisions`）；自己选片打开或切换时清掉 App 预选的（`decidedByUser` 为 false 的）；只修图把全部照片放进一个组（`singleGroup`）、右侧只有修图、不显示模糊闭眼、P/X/U/数字键不生效、导出全部照片。工具栏按钮都是「图标 + 中文」，按方式显示：AI 选片方式有 AI 选片和一键初修，自己选片方式只有一键去杂物（`startBatchCleanup`，复用一键初修流程但不调色不磨皮）。
+- **AI 请求 3 分钟放弃、进度与取消**（2026-10-22 用户反馈一键初修、对话改图「卡死」）：看图和画图请求都走 `AIRequest`（`VisionChatClient.swift`），单个请求总时长超过 3 分钟报「超过 3 分钟没有回应，已放弃」。一键初修进度在 `AppModel.retouchRun`（阶段、找杂物 / 去杂物计数、已用时间），本轮交出去的去杂物任务标 `batch`，只等这些；`cancelRetouch()` 中断请求、清掉排队的并写进初修记录。对话改图的当前步骤在 `chatThinking`，`cancelChat` 取消理解、`stopChatJobs` 停止卡片上的后台任务；对话的去杂物插到排队的一键初修任务前面，并多给一个并发名额（`canStart`）。取消导致的错误用 `AIRequest.isCancellation` 识别，不算失败。
 - **网格总览**：`gridMode` + `gridSelection`；P/X/U 在网格里作用于整批选中照片（`decisionTargets`），整批算一步撤销。
 - **一键初修**：对已选照片全自动调色（手动修过的保留）、皮肤 0.25、AI 定位背景杂物后入队去除；主体相关物品只记录不去除。每张的结果写进 `Photo.retouchLog`，完成后弹初修总结。
 

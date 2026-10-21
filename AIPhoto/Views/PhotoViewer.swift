@@ -159,7 +159,9 @@ struct PhotoViewer: View {
     private var badges: some View {
         HStack(spacing: 6) {
             DecisionBadge(decision: photo.decision)
-            if isEdited, !model.compareMode {
+            if model.isCleaning(photo.id) || photo.retouchLog != nil {
+                RetouchBadge(photo: photo)
+            } else if isEdited, !model.compareMode {
                 Text("已修图").badgeStyle(.blue)
             }
             if model.compareMode, !isEdited {
@@ -261,6 +263,24 @@ extension View {
             .padding(.horizontal, 7)
             .padding(.vertical, 3)
             .background(color.opacity(0.85), in: Capsule())
+    }
+}
+
+/// 一键初修的状态：修复中 / 排队中 / 需检查 / 已初修。胶片条、网格和大图共用，同一种颜色一眼认出
+struct RetouchBadge: View {
+    @Environment(AppModel.self) private var model
+    let photo: Photo
+
+    var body: some View {
+        if model.isWorking(photo.id) {
+            Label("修复中", systemImage: "hourglass").badgeStyle(.blue)
+        } else if model.isCleaning(photo.id) {
+            Label("排队中", systemImage: "clock").badgeStyle(.gray)
+        } else if photo.retouchLog?.needsReview == true {
+            Label("需检查", systemImage: "exclamationmark.triangle.fill").badgeStyle(.pink)
+        } else if photo.retouchLog != nil {
+            Label("已初修", systemImage: "checkmark.seal.fill").badgeStyle(.teal)
+        }
     }
 }
 
