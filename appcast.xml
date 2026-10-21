@@ -3,6 +3,22 @@
     <channel>
         <title>AIPhoto</title>
         <item>
+            <title>0.9.2</title>
+            <pubDate>Thu, 22 Oct 2026 00:12:24 +0800</pubDate>
+            <sparkle:version>16</sparkle:version>
+            <sparkle:shortVersionString>0.9.2</sparkle:shortVersionString>
+            <sparkle:minimumSystemVersion>15.0</sparkle:minimumSystemVersion>
+            <sparkle:hardwareRequirements>arm64</sparkle:hardwareRequirements>
+            <description sparkle:format="markdown"><![CDATA[# 0.9.2
+
+- 一键初修：底部显示正在做哪一步、已用多久，能看到正在修哪几张，可以中途取消（已修好的保留）
+- 对话改图：显示正在做哪一步和已等多久，可以取消；去杂物插队先做，不用等一键初修排队
+- 单个 AI 请求超过 3 分钟没回应就放弃并提示，不再一直转圈
+- 「已初修」「修复中」「排队中」「需检查」标记更醒目，左侧分组也显示修复中和已初修张数
+]]></description>
+            <enclosure url="https://github.com/fulisadawang/aiphoto/releases/download/v0.9.2/AIPhoto-0.9.2.zip" length="5782855" type="application/octet-stream" sparkle:edSignature="AUkvQiIzgjoMIB9oy74ToB7lXK1ojEgvquSbi4ktJuQ44uAwK7UY4GuE8hRxDFyCs2aCFZV5SuNzMLN4iJE7Dg=="/>
+        </item>
+        <item>
             <title>0.9.1</title>
             <pubDate>Wed, 21 Oct 2026 23:17:47 +0800</pubDate>
             <sparkle:version>15</sparkle:version>
@@ -41,22 +57,6 @@
 - 设置页显示最近 7 天实际用到的模型；对话改图的每张结果卡片显示这次是哪个模型回答的
 ]]></description>
             <enclosure url="https://github.com/fulisadawang/aiphoto/releases/download/v0.9.0/AIPhoto-0.9.0.zip" length="5729481" type="application/octet-stream" sparkle:edSignature="ku2qtxYk2sHCIQz6nFbZOHngYZfmpaLARZ6bAu2ldUPrBKETDZCi/EROuqvR0fVV/C1LlyR8+UpIbacWcHmcCA=="/>
-        </item>
-        <item>
-            <title>0.8.4</title>
-            <pubDate>Tue, 20 Oct 2026 23:14:12 +0800</pubDate>
-            <sparkle:version>13</sparkle:version>
-            <sparkle:shortVersionString>0.8.4</sparkle:shortVersionString>
-            <sparkle:minimumSystemVersion>15.0</sparkle:minimumSystemVersion>
-            <sparkle:hardwareRequirements>arm64</sparkle:hardwareRequirements>
-            <description sparkle:format="markdown"><![CDATA[## 推荐模型改为「视觉修图」
-
-- AI 选片、找杂物、对话改图默认改用 Magpie 新增的「视觉修图」模型组：实拍 31 张选片 18 秒完成，找杂物框得准
-- 原来的 Gemini 改为备用，推荐模型出错时自动换它
-- 之前在设置里用着旧推荐的，升级后自动换成新推荐；自己选过别的模型的保持不变
-- 一键初修找杂物时，虚化的前景树叶、枝条不再去除
-]]></description>
-            <enclosure url="https://github.com/fulisadawang/aiphoto/releases/download/v0.8.4/AIPhoto-0.8.4.zip" length="5682454" type="application/octet-stream" sparkle:edSignature="wELMWBVjYrU1weH1kkKhEaSfh/RoJVWm3H084Jd2jLkAeXpGoF5eBt5bCusDY9zArbqLXNmPKc4+TSvBxqZAAA=="/>
         </item>
     </channel>
 </rss>
