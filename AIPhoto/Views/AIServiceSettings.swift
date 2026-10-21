@@ -2,6 +2,7 @@ import SwiftUI
 
 /// 设置 › AI 服务：新手只看状态和档位；连接、每件事用哪个模型、出错自动换收在高级设置里（需求清单第 14 节）
 struct AIServiceSettings: View {
+    @Environment(AppModel.self) private var model
     @AppStorage(AppSettings.baseURLKey) private var baseURL = AppSettings.defaultBaseURL
     @AppStorage(AppSettings.autoFallbackKey) private var autoFallback = true
     @AppStorage(InpaintService.separateKey) private var imageSeparate = false
@@ -32,6 +33,7 @@ struct AIServiceSettings: View {
                 if showAdvanced {
                     connectionSection
                     modelSection
+                    localModelSection
                     fallbackSection
                 }
             }
@@ -274,6 +276,39 @@ struct AIServiceSettings: View {
         case .locate: .orange
         case .look: .green
         case .image: .purple
+        }
+    }
+
+    // MARK: - 高级：本机模型
+
+    private var localModelSection: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            SectionLabel("本机模型 · 不上传、不花钱")
+            SettingRow(symbol: "cpu", tint: .teal, title: "去杂物（LaMa）",
+                       detail: localModelDetail) {
+                switch model.lamaState {
+                case .installed:
+                    Button("删除", role: .destructive) { model.removeLaMa() }
+                case .notInstalled, .failed:
+                    Button("下载") { model.installLaMa() }
+                case .downloading(let value):
+                    ProgressView(value: value).frame(width: 90)
+                case .installing:
+                    ProgressView().controlSize(.small)
+                }
+            }
+            .groupBox()
+        }
+    }
+
+    private var localModelDetail: String {
+        let size = ByteCountFormatter.string(fromByteCount: LaMaModel.byteCount, countStyle: .file)
+        switch model.lamaState {
+        case .installed: return "已下载 · 不到画面 0.3% 的小块在本机去除，大的仍用画图的 AI"
+        case .notInstalled: return "未下载（\(size)）· 下载后小块杂物在本机去除"
+        case .downloading(let value): return String(format: "正在下载 %.0f%%", value * 100)
+        case .installing: return "正在准备…"
+        case .failed(let message): return "下载失败：\(message)"
         }
     }
 

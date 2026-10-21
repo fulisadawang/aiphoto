@@ -104,6 +104,8 @@ final class AppModel {
         var fromChat = false
         /// 对话里对应的结果卡片
         var chatMessageID: UUID? = nil
+        /// 「用 AI 重画这一处」：不交给本机模型
+        var forceAI = false
         var isRunning = false
     }
 
@@ -915,9 +917,16 @@ final class AppModel {
         do {
             guard let photo = photos[job.photoID] else { throw CleanupEngine.CleanupError.unreadable }
             let purpose: AIPurpose = job.fromChat ? .chatRedraw : job.prompt == Compositor.blendPrompt ? .compositeBlend : .cleanup
-            let provider = try await InpaintService.makeProvider(purpose: purpose)
+            let local: InpaintProvider? = !job.forceAI && LaMaModel.isInstalled ? LaMaInpainter() : nil
+            // 云端没配置时，本机能处理的小块照样处理
+            let provider: InpaintProvider?
+            do {
+                provider = try await InpaintService.makeProvider(purpose: purpose)
+            } catch where local != nil {
+                provider = nil
+            }
             outcome = .success(try await CleanupEngine.run(
-                photo: photo, strokes: job.strokes, prompt: job.prompt, folder: folder, provider: provider
+                photo: photo, strokes: job.strokes, prompt: job.prompt, folder: folder, provider: provider, local: local
             ))
         } catch {
             outcome = .failure(error)
@@ -1255,6 +1264,64 @@ final class AppModel {
         var log = photos[photoID]?.retouchLog ?? RetouchLog()
         change(&log)
         photos[photoID]?.retouchLog = log
+    }
+
+    /// 最近一处是本机补的：撤掉它，用同样的涂抹交给 AI 重新去除
+    func redoLastCleanupWithAI() {
+        guard let id = selectedPhotoID, var patches = photos[id]?.cleanups, let last = patches.last,
+              last.local == true, let saved = last.strokes else { return }
+        recordUndo(.cleanups, ids: [id], label: "用 AI 重画")
+        patches.removeLast()
+        photos[id]?.cleanups = patches.isEmpty ? nil : patches
+        scheduleSave()
+        var job = CleanupJob(photoID: id, strokes: saved.map(\.brush), itemName: nil, isLarge: false)
+        job.forceAI = true
+        cleanupJobs.append(job)
+        pumpCleanupQueue()
+    }
+
+    // MARK: - 本机模型
+
+    enum LocalModelState: Equatable {
+        case notInstalled
+        case downloading(Double)
+        case installing
+        case installed
+        case failed(String)
+    }
+
+    var lamaState: LocalModelState = LaMaModel.isInstalled ? .installed : .notInstalled
+
+    func installLaMa() {
+        switch lamaState {
+        case .downloading, .installing: return
+        default: break
+        }
+        lamaState = .downloading(0)
+        Task {
+            do {
+                try await LaMaModel.install { value in
+                    Task { @MainActor in
+                        if case .downloading = self.lamaState { self.lamaState = value >= 1 ? .installing : .downloading(value) }
+                    }
+                }
+                lamaState = .installed
+            } catch {
+                lamaState = .failed(error.localizedDescription)
+            }
+        }
+    }
+
+    func removeLaMa() {
+        Task {
+            await LaMaEngine.shared.unload()
+            do {
+                try LaMaModel.remove()
+                lamaState = .notInstalled
+            } catch {
+                alert = AlertInfo(title: "删除本机模型失败", message: error.localizedDescription)
+            }
+        }
     }
 
     func undoCleanup() {

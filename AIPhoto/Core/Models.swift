@@ -157,6 +157,23 @@ struct CleanupPatch: Codable, Identifiable, Equatable {
     let id: UUID
     /// 归一化区域（原点左上），相对于方向校正后的整张照片
     var rect: CGRect
+    /// 本机 LaMa 补的为 true；旧记录、AI 补的、合成的为 nil
+    var local: Bool?
+    /// 去杂物的涂抹，用于「用 AI 重画这一处」；旧记录和合成没有
+    var strokes: [SavedStroke]?
+}
+
+/// 可保存的画笔笔迹，与 BrushStroke 相同
+struct SavedStroke: Codable, Equatable {
+    var points: [CGPoint]
+    var radius: CGFloat
+
+    init(_ stroke: BrushStroke) {
+        points = stroke.points
+        radius = stroke.radius
+    }
+
+    var brush: BrushStroke { BrushStroke(points: points, radius: radius) }
 }
 
 /// 画笔笔迹，坐标归一化（原点左上），半径以画面宽度为单位

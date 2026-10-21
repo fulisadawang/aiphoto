@@ -39,8 +39,10 @@ enum CleanupEngine {
         patchDirectory(folder: folder).appendingPathComponent("\(id.uuidString).png")
     }
 
+    /// provider：云端补全；local：本机 LaMa（已下载时传入），小块自动交给它，出错退回云端
     static func run(
-        photo: Photo, strokes: [BrushStroke], prompt: String? = nil, folder: URL, provider: InpaintProvider
+        photo: Photo, strokes: [BrushStroke], prompt: String? = nil, folder: URL,
+        provider: InpaintProvider?, local: InpaintProvider? = nil
     ) async throws -> CleanupPatch {
         guard !strokes.isEmpty else { throw CleanupError.emptyStrokes }
         guard let source = PhotoRenderer.fullResolution(of: photo) else { throw CleanupError.unreadable }
@@ -63,7 +65,22 @@ enum CleanupEngine {
               let uploadMask = drawMask(strokes, crop: crop, imageSize: imageSize, size: uploadSize, grow: 1.1)
         else { throw CleanupError.render }
 
-        let filled = try await provider.inpaint(image: uploadImage, mask: uploadMask, prompt: prompt)
+        // 只有"去掉"能交给本机：按文字重画需要会画画的模型
+        let maskFraction = coverage(of: uploadMask) * Double(crop.width * crop.height) / Double(imageSize.width * imageSize.height)
+        let downscale = Double(max(crop.width, crop.height)) / Double(LaMaModel.side)
+        var usedLocal = false
+        var filled: CGImage?
+        if let local, prompt == nil, LaMaModel.suits(maskFraction: maskFraction, downscale: downscale) {
+            filled = try? await local.inpaint(image: uploadImage, mask: uploadMask, prompt: nil)
+            usedLocal = filled != nil
+        }
+        if filled == nil {
+            guard let provider else { throw InpaintService.ConfigError.notConfigured }
+            filled = try await provider.inpaint(image: uploadImage, mask: uploadMask, prompt: prompt)
+        }
+        guard var filled else { throw CleanupError.render }
+        // 本机补出来比相机 JPG 平滑，补回同等颗粒，避免一块"塑料感"
+        if usedLocal, let grained = grainMatched(filled, like: uploadImage, mask: uploadMask) { filled = grained }
 
         // 结果放大回原始分辨率，只保留涂抹区域（边缘羽化），其余部分仍是原图像素
         guard let filledFull = resize(filled, to: crop.size),
@@ -79,10 +96,15 @@ enum CleanupEngine {
             kCIInputMaskImageKey: feathered,
         ]).cropped(to: CGRect(origin: .zero, size: crop.size))
 
-        let patch = CleanupPatch(id: UUID(), rect: CGRect(
-            x: crop.minX / imageSize.width, y: crop.minY / imageSize.height,
-            width: crop.width / imageSize.width, height: crop.height / imageSize.height
-        ))
+        let patch = CleanupPatch(
+            id: UUID(),
+            rect: CGRect(
+                x: crop.minX / imageSize.width, y: crop.minY / imageSize.height,
+                width: crop.width / imageSize.width, height: crop.height / imageSize.height
+            ),
+            local: usedLocal ? true : nil,
+            strokes: prompt == nil ? strokes.map(SavedStroke.init) : nil
+        )
         try FileManager.default.createDirectory(at: patchDirectory(folder: folder), withIntermediateDirectories: true)
         try PhotoRenderer.context.writePNGRepresentation(
             of: patchImage, to: patchURL(patch.id, folder: folder), format: .RGBA8, colorSpace: PhotoRenderer.sRGB
@@ -183,6 +205,71 @@ enum CleanupEngine {
         }
         return context.makeImage()
     }
+
+    /// 蒙版里白色像素占比
+    static func coverage(of mask: CGImage) -> Double {
+        let side = 128
+        var pixels = [UInt8](repeating: 0, count: side * side)
+        guard let context = CGContext(
+            data: &pixels, width: side, height: side, bitsPerComponent: 8, bytesPerRow: side,
+            space: CGColorSpaceCreateDeviceGray(), bitmapInfo: CGImageAlphaInfo.none.rawValue
+        ) else { return 1 }
+        context.draw(mask, in: CGRect(x: 0, y: 0, width: side, height: side))
+        return Double(pixels.filter { $0 > 127 }.count) / Double(side * side)
+    }
+
+    /// 补回颗粒：比较蒙版外原图和蒙版内补全结果的拉普拉斯强度，差多少补多少均匀噪点。
+    /// 用中位数而不是均值：窗框、树枝这类强边缘会把均值拉高，补出满屏白点（实测）。
+    /// 白噪声拉普拉斯的标准差约为噪声的 √20 倍，中位数绝对值约为标准差的 0.6745 倍
+    static func grainMatched(_ filled: CGImage, like original: CGImage, mask: CGImage) -> CGImage? {
+        let side = 512
+        func gray(_ image: CGImage) -> [Float] {
+            var pixels = [UInt8](repeating: 0, count: side * side)
+            let context = CGContext(
+                data: &pixels, width: side, height: side, bitsPerComponent: 8, bytesPerRow: side,
+                space: CGColorSpaceCreateDeviceGray(), bitmapInfo: CGImageAlphaInfo.none.rawValue
+            )
+            context?.interpolationQuality = .high
+            context?.draw(image, in: CGRect(x: 0, y: 0, width: side, height: side))
+            return pixels.map(Float.init)
+        }
+        let a = gray(original), b = gray(filled), m = gray(mask)
+        func medianLaplacian(_ p: [Float], inside: Bool) -> Float {
+            var values: [Float] = []
+            for y in stride(from: 1, to: side - 1, by: 2) { for x in stride(from: 1, to: side - 1, by: 2) {
+                let i = y * side + x
+                guard (m[i] > 127) == inside else { continue }
+                let neighbors: Float = p[i - 1] + p[i + 1] + p[i - side] + p[i + side]
+                values.append(abs(4 * p[i] - neighbors))
+            } }
+            guard !values.isEmpty else { return 0 }
+            values.sort()
+            return values[values.count / 2]
+        }
+        let scale: Float = 0.6745 * Float(20).squareRoot()
+        let target = medianLaplacian(a, inside: false) / scale, current = medianLaplacian(b, inside: true) / scale
+        let missing: Float = max(0, target * target - current * current)
+        // 上限约 3/255：相机 JPG 的颗粒不会更大，再大就是测量被纹理带偏了
+        let sigma = min(Double(missing.squareRoot()) / 255, 3.0 / 255)
+        guard sigma > 0.002 else { return nil }
+        let extent = CGRect(x: 0, y: 0, width: filled.width, height: filled.height)
+        // 均匀噪点的标准差为幅度 / √12
+        let amplitude = Float(sigma) * Float(12).squareRoot()
+        let noise = CIFilter(name: "CIRandomGenerator")!.outputImage!.cropped(to: extent)
+        // 在 sRGB 数值上叠加（与相机 JPG 的颗粒一致）；不能用加法合成，它会把透明度也相加，炸出满屏白点（实测）
+        let srgb = CIImage(cgImage: filled).applyingFilter("CILinearToSRGBToneCurve")
+        guard let grained = grainKernel.apply(extent: extent, arguments: [srgb, noise, amplitude]) else { return nil }
+        let mixed = grained.applyingFilter("CISRGBToneCurveToLinear").cropped(to: extent)
+        return PhotoRenderer.context.createCGImage(mixed, from: extent, format: .RGBA8, colorSpace: PhotoRenderer.sRGB)
+    }
+
+    /// 灰度颗粒：同一个随机数加到三个通道，只改明暗不改颜色
+    private static let grainKernel = CIColorKernel(source: """
+    kernel vec4 grain(__sample s, __sample n, float amplitude) {
+        float d = (n.r - 0.5) * amplitude;
+        return vec4(clamp(s.rgb + d, 0.0, 1.0), s.a);
+    }
+    """)!
 
     static func resize(_ image: CGImage, to size: CGSize) -> CGImage? {
         if image.width == Int(size.width), image.height == Int(size.height) { return image }
