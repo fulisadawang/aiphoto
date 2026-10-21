@@ -58,7 +58,8 @@ struct FilmstripCell: View {
                     } else if photo.retouchLog?.needsReview == true {
                         Text("需检查").badgeStyle(.pink)
                     }
-                    ForEach(photo.flags.sorted { $0.rawValue < $1.rawValue }, id: \.self) { flag in
+                    // 只修图时不显示选片提示
+                    ForEach(model.showsCullingHints ? photo.flags.sorted { $0.rawValue < $1.rawValue } : [], id: \.self) { flag in
                         Text(flag.label).badgeStyle(.orange)
                     }
                 }

@@ -30,6 +30,8 @@ struct ChatStep: Codable, Equatable {
     var failed = 0
     /// 后台完成后生成的修补块，撤销这步时一并去掉
     var patchIDs: [UUID] = []
+    /// Magpie 实际用来理解这句话的模型；旧记录没有
+    var model: String?
     var undone = false
 
     var pending: Int { max(0, jobs - finished - failed) }
@@ -56,6 +58,8 @@ struct ChatEditor {
         let adjust: [String: Double]
         let remove: [Target]
         let redraw: [Target]
+        /// Magpie 实际用来回答的模型
+        var model: String? = nil
     }
 
     enum PlanError: LocalizedError {
@@ -96,10 +100,16 @@ struct ChatEditor {
             ["type": "text", "text": Self.outputInstruction],
         ]
         // 模型偶尔格式不对或回复中途断掉（只剩半截 JSON），重试一次
+        func attempt() async throws -> Plan {
+            let result = try await client.response(system: Self.systemPrompt, content: content)
+            var plan = try Self.parse(result.data)
+            plan.model = result.model
+            return plan
+        }
         do {
-            return try Self.parse(try await client.json(system: Self.systemPrompt, content: content))
+            return try await attempt()
         } catch let error where error is PlanError || error is VisionChatClient.ClientError {
-            return try Self.parse(try await client.json(system: Self.systemPrompt, content: content))
+            return try await attempt()
         }
     }
 

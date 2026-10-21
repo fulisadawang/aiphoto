@@ -58,6 +58,7 @@ App 显示名为「小宇专属」（2026-10-20 用户改名）。显示名来�
 - **放大**：`ZoomState.pixelRatio` 是"屏幕像素 / 原图像素"（1 = 100%），存在 `AppModel` 里，切换照片时保持。放大超过预览分辨率（3000）时大图改加载全尺寸。
 - **后台去杂物队列**：`enqueueCleanup` 排队，最多 2 个并发，同一张照片的任务按顺序执行（后一次叠加在前一次结果上）；不使用 `perform`/`isBusy`，不占住界面。失败在队列清空时统一提示。
 - **可取消的忙碌任务**：`perform(_:cancellable:)` 记下任务，`cancelBusy()` 取消（状态栏「取消」按钮、菜单 ⌘.）；目前只有 AI 选片可取消。取消时已完成批次的结果保留，请求立即中断、不再换模型重试。进度按张数算在 `AppModel.aiRun`，侧栏据此标出排队中 / 评估中的组。
+- **处理方式**（`ShootMode`，需求清单第 17 节）：每次打开文件夹先弹 `ShootModeSheet` 问「AI 选片 / 自己选片 / 已选好，只修图」，入口统一走 `AppModel.requestOpen`（打开面板、拖到窗口、Dock / `open` 命令），方式存在 `session.json` 的 `mode`。只有 AI 选片会自动预选（`applyAutoDecisions`）；自己选片打开或切换时清掉 App 预选的（`decidedByUser` 为 false 的）；只修图把全部照片放进一个组（`singleGroup`）、右侧只有修图、不显示模糊闭眼、P/X/U/数字键不生效、导出全部照片。工具栏按钮都是「图标 + 中文」，按方式显示：AI 选片方式有 AI 选片和一键初修，自己选片方式只有一键去杂物（`startBatchCleanup`，复用一键初修流程但不调色不磨皮）。
 - **网格总览**：`gridMode` + `gridSelection`；P/X/U 在网格里作用于整批选中照片（`decisionTargets`），整批算一步撤销。
 - **一键初修**：对已选照片全自动调色（手动修过的保留）、皮肤 0.25、AI 定位背景杂物后入队去除；主体相关物品只记录不去除。每张的结果写进 `Photo.retouchLog`，完成后弹初修总结。
 
@@ -73,7 +74,7 @@ App 显示名为「小宇专属」（2026-10-20 用户改名）。显示名来�
 - **高光保护要看最亮通道**：`maxExposureKeepingHighlights` 原来按亮度算，饱和红墙红色通道先到顶而亮度不高，实拍红墙溢出从 0.9% 涨到 12%。现在按 RGB 最大通道算。
 - **多图合成**：结果存成 `CleanupPatch`，复用去杂物的叠加、撤销和对比。连拍对齐必须做主体周围的局部配准并按透视变换贴回：只做整体配准时被远处树枝主导，视差让近处窗框错开出现半透明双影。连拍换人要连带盖住原来的人（`coverMask` / `expandedMask`），否则姿势不同会出现重影。合成进行中 `ContentView` 的快捷键全部让出，Esc 取消。
 - **人像修复**（`PortraitRetoucher`）：关键点存在 `FaceInfo.shape`，旧记录打开人像工具或导出时用 `AppModel.withFaceShapes` 补测。先做皮肤、黑眼圈、亮眼、牙齿，最后才做瘦脸大眼的变形，否则关键点对不上。内核用 CIKL 字符串写（已弃用但 macOS 15 可用），本机没装 Metal 工具链。瘦脸不能用 Gustafsson 原式（位移远小于半径时近乎整体平移，半径处撕裂），改用 (1-(d/r)²)² 衰减，控制点取轮廓 12%～32% 处，避开嘴角。亮眼只提亮，加对比和锐化会让眼睛像描了黑边。合影单独调整按 `LocalAnalysis.faces` 下标存在 `EditSettings.faceOverrides`。
-- **模型按用途选**（`AIModels.swift`）：`AIUse` 五种用途（选片 / 找杂物 / 对话改图 / 理解修图描述 / 画图）各自存一个模型名，选片、对话改图、画图沿用旧 key；候选和推荐在 `ModelCatalog.options`，除 Gemini 3.8 Flash 和 gpt-image-2 外都还没实测（标「未测试」）。新增 AI 调用用 `makeVisionClient(use:)` 取模型，出错自动换推荐模型由 `VisionChatClient.fallbackModel` / 图片接口重试完成，用量里 `UsageEntry.fallback` 标出。画图默认和看图共用连接（`InpaintService.separateKey`）。对话面板里换的模型存在 `AppModel.chatModelOverride`，换照片清空。
+- **模型按用途选**（`AIModels.swift`）：`AIUse` 五种用途（选片 / 找杂物 / 对话改图 / 理解修图描述 / 画图）各自存一个模型名，选片、对话改图、画图沿用旧 key；下拉列表 = 视觉修图组 + 组里 11 个具体模型（`ModelCatalog.groupModels`，顺序与 Magpie 一致；Claude 照样列出但标出并在选片时提醒，Grok 受 Cursor 免费版限制标为用不了）。出错换模型交给 Magpie 的组，App 不再分档、不再自己重试（第 18 节）。新增 AI 调用用 `makeVisionClient(use:)` 取模型；`VisionChatClient.response` 同时返回 Magpie 实际用的模型名，对话改图卡片上显示。画图默认和看图共用连接（`InpaintService.separateKey`）。对话面板里换的模型存在 `AppModel.chatModelOverride`，换照片清空。
 - **对话结果卡片**：AI 回复带 `ChatStep`（改动说明、调色前参数、后台任务数、生成的修补块 id），后台任务用 `chatMessageID` 回写到卡片；「撤销这步」只在最新一张卡片上，撤销后正在跑的任务结果不再贴上。
 - **AI 请求必须带 `MagpieUsage.userAgent`**：Magpie 按 User-Agent 区分调用方，用量统计靠它；新增 AI 调用时要传 `AIPurpose`，否则统计里没有这一项。
 - **右侧面板自动切换**：入口要用 `AppModel.showTool(_:)` 切到修图模式的对应工具；画笔只属于去杂物工具，离开该工具或切回选片模式会自动关闭画笔。新增修图工具时加到 `EditTool`。

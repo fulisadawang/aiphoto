@@ -105,21 +105,10 @@ struct OpenAICompatibleInpainter: InpaintProvider {
     }
 
     func inpaint(image: CGImage, mask: CGImage, prompt: String?) async throws -> CGImage {
-        do {
-            return try await send(model: model, image: image, mask: mask, prompt: prompt, fallback: false)
-        } catch {
-            // 自定义的图片模型出错时，改用服务默认的图片模型（推荐）重试一次
-            guard model != nil, AppSettings.autoFallback, error is URLError || error is InpaintError else { throw error }
-            if case .encode = error as? InpaintError { throw error }
-            return try await send(model: nil, image: image, mask: mask, prompt: prompt, fallback: true)
-        }
-    }
-
-    private func send(model: String?, image: CGImage, mask: CGImage, prompt: String?, fallback: Bool) async throws -> CGImage {
         let start = Date()
         var ok = false
         defer {
-            UsageLog.shared.record(purpose: purpose, start: start, responseID: nil, requestedModel: model ?? "", ok: ok, fallback: fallback)
+            UsageLog.shared.record(purpose: purpose, start: start, responseID: nil, requestedModel: model ?? "", ok: ok)
         }
         guard let imageData = CleanupEngine.pngData(image),
               let maskImage = Self.transparentMask(from: mask),

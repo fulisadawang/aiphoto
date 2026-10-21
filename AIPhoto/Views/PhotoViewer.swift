@@ -177,7 +177,8 @@ struct PhotoViewer: View {
                 Label("AI \(ai.score)", systemImage: ai.pick ? "star.fill" : "sparkles")
                     .badgeStyle(ai.pick ? .purple : .gray)
             }
-            ForEach(photo.flags.sorted { $0.rawValue < $1.rawValue }, id: \.self) { flag in
+            // 只修图时不显示选片提示
+            ForEach(model.showsCullingHints ? photo.flags.sorted { $0.rawValue < $1.rawValue } : [], id: \.self) { flag in
                 Text(flag.label).badgeStyle(.orange)
             }
             if photo.rating > 0 {

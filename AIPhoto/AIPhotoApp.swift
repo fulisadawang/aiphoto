@@ -59,7 +59,7 @@ struct AIPhotoApp: App {
             ContentView()
                 .environment(model)
                 .frame(minWidth: 1100, minHeight: 700)
-                .onAppear { delegate.openFolder = { [model] in model.load($0) } }
+                .onAppear { delegate.openFolder = { [model] in model.requestOpen($0) } }
                 .background(ReopenBridge(delegate: delegate))
         }
         .commands {
@@ -81,25 +81,39 @@ struct AIPhotoApp: App {
                     .disabled(model.redoLabel == nil)
             }
             CommandMenu("选片") {
+                // 按处理方式显示（第 17 节）：AI 选片和一键初修只在 AI 选片方式下，一键去杂物只在自己选片方式下
                 Group {
-                    Button("AI 选片（只处理还没评估的组）") { model.runAI(all: false) }
-                        .keyboardShortcut("r")
-                    Button("全部重新 AI 选片") { model.runAI(all: true) }
-                    Divider()
-                    Button("把选片结果写入 RAW 的 XMP 星级") { model.writeXMP() }
-                        .keyboardShortcut("e", modifiers: [.command, .shift])
-                    Button("拷贝已选照片到文件夹…") { model.copyPicked() }
-                    Divider()
-                    Button("一键初修已选照片…") { model.showRetouchStart = true }
-                        .keyboardShortcut("r", modifiers: [.command, .shift])
-                    Button("查看初修总结") { model.showRetouchSummary = true }
-                    Divider()
-                    Button("已选照片自动调色（跳过已调过的）") { model.autoAdjustAllPicked() }
-                    Button("导出已选成片（JPG）…") { model.exportFinishedJPEGs() }
+                    if model.shootMode == .ai {
+                        Button("AI 选片（只处理还没评估的组）") { model.runAI(all: false) }
+                            .keyboardShortcut("r")
+                        Button("全部重新 AI 选片") { model.runAI(all: true) }
+                        Divider()
+                    }
+                    if model.shootMode != .editOnly {
+                        Button("把选片结果写入 RAW 的 XMP 星级") { model.writeXMP() }
+                            .keyboardShortcut("e", modifiers: [.command, .shift])
+                        Button("拷贝已选照片到文件夹…") { model.copyPicked() }
+                        Divider()
+                    }
+                    if model.shootMode == .ai {
+                        Button("一键初修已选照片…") { model.showRetouchStart = true }
+                            .keyboardShortcut("r", modifiers: [.command, .shift])
+                    }
+                    if model.shootMode == .manual {
+                        Button("一键去杂物已选照片…") { model.showCleanupStart = true }
+                            .keyboardShortcut("r", modifiers: [.command, .shift])
+                    }
+                    if model.shootMode != .editOnly {
+                        Button(model.lastBatchOnlyCleanup ? "查看去杂物总结" : "查看初修总结") { model.showRetouchSummary = true }
+                        Divider()
+                        Button("已选照片自动调色（跳过已调过的）") { model.autoAdjustAllPicked() }
+                    }
+                    Button(model.shootMode == .editOnly ? "导出全部成片（JPG）…" : "导出已选成片（JPG）…") { model.exportFinishedJPEGs() }
                         .keyboardShortcut("e")
-                    Divider()
-                    Divider()
-                    Button("按当前设置重新分组") { model.regroup() }
+                    if model.shootMode != .editOnly {
+                        Divider()
+                        Button("按当前设置重新分组") { model.regroup() }
+                    }
                 }
                 .disabled(model.groups.isEmpty || model.isBusy)
                 Button("取消 AI 选片") { model.cancelBusy() }

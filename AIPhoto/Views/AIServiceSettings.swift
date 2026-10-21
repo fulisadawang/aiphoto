@@ -1,9 +1,9 @@
 import SwiftUI
 
-/// 设置 › AI 服务：新手只看状态和档位；连接、每件事用哪个模型、出错自动换收在高级设置里（需求清单第 14 节）
+/// 设置 › AI 服务：新手只看状态和「视觉修图」组的说明；连接、每件事用哪个模型收在高级设置里（需求清单第 14、18 节）
 struct AIServiceSettings: View {
+    @Environment(AppModel.self) private var model
     @AppStorage(AppSettings.baseURLKey) private var baseURL = AppSettings.defaultBaseURL
-    @AppStorage(AppSettings.autoFallbackKey) private var autoFallback = true
     @AppStorage(InpaintService.separateKey) private var imageSeparate = false
     @AppStorage(InpaintService.baseURLKey) private var imageBaseURL = AppSettings.defaultBaseURL
     @AppStorage("aiAdvancedExpanded") private var showAdvanced = false
@@ -14,8 +14,10 @@ struct AIServiceSettings: View {
     @State private var keyStatus = ""
     @State private var imageKey = ""
     @State private var imageKeyStatus = ""
-    /// 改模型后刷新档位显示（@AppStorage 分散在各行里）
+    /// 改模型后刷新显示（@AppStorage 分散在各行里）
     @State private var revision = 0
+    /// 最近 7 天 Magpie 实际用到的模型；nil 为还没读到
+    @State private var recentModels: [UsageReport.Line]?
 
     enum ProbeState: Equatable {
         case checking
@@ -27,18 +29,20 @@ struct AIServiceSettings: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 0) {
                 statusCard
-                tierSection
+                groupSection
                 advancedHeader
                 if showAdvanced {
                     connectionSection
                     modelSection
-                    fallbackSection
                 }
             }
             .padding(20)
         }
         .frame(height: 560)
-        .task { await check() }
+        .task {
+            await check()
+            await loadRecentModels()
+        }
         .onAppear {
             keyStatus = KeychainStore.isSaved(account: AppSettings.keychainAccount) ? "已保存" : ""
             imageKeyStatus = KeychainStore.isSaved(account: InpaintService.keychainAccount) ? "已保存" : ""
@@ -95,40 +99,59 @@ struct AIServiceSettings: View {
         }
     }
 
-    private var tierSection: some View {
+    /// 出错换模型由 Magpie 的「视觉修图」组按顺序完成，App 不再分档、不再自己重试（需求清单第 18 节）
+    private var groupSection: some View {
         let _ = revision
-        let current = ModelCatalog.currentTier
         return VStack(alignment: .leading, spacing: 8) {
-            Text("你更在意哪一点？选一个，App 会给每件事配好合适的 AI")
-                .font(.callout)
-                .foregroundStyle(.secondary)
-                .padding(.top, 18)
-            HStack(spacing: 10) {
-                TierCard(symbol: "banknote", tint: .green, title: "省钱",
-                         detail: "选片换成更便宜的 AI；找杂物和改图仍用准的", price: "未实测 · 花费看「用量」",
-                         selected: current == .saving) { choose(.saving) }
-                TierCard(symbol: "scalemass", tint: .accentColor, title: "推荐",
-                         detail: "选片求快，找杂物和改图求准。大多数时候选它", price: "实测过 · 花费看「用量」",
-                         selected: current == .recommended) { choose(.recommended) }
-                TierCard(symbol: "diamond", tint: .purple, title: "效果优先",
-                         detail: "每一步都用更强的 AI，更慢也更贵，适合重要交付", price: "未实测 · 花费看「用量」",
-                         selected: current == .best) { choose(.best) }
+            SectionLabel("用的是哪个 AI")
+            VStack(alignment: .leading, spacing: 10) {
+                HStack(alignment: .top, spacing: 12) {
+                    IconTile(symbol: "square.stack.3d.up", tint: .accentColor, size: 30)
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text(ModelCatalog.isAllRecommended ? "Magpie 的「视觉修图」组" : "自定义（高级设置里改过）").font(.headline)
+                        Text("AI 选片、找杂物、对话改图默认都用它：按你在 Magpie 里排的顺序用模型，出错自动换下一个。想换顺序或去掉某个模型，在 Magpie 的「视觉修图」里改。")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                }
+                Divider()
+                recentModelsView
             }
-            if current == nil {
-                Label("当前是自定义设置（在高级设置里改过）。点任一档位可恢复。", systemImage: "slider.horizontal.3")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            } else if current != .recommended {
-                Label("这个档位的模型还没用你的照片测过；出错时会自动换回推荐模型。", systemImage: "info.circle")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
+            .padding(14)
+            .groupBox()
         }
     }
 
-    private func choose(_ tier: ModelCatalog.Tier) {
-        ModelCatalog.apply(tier)
-        revision += 1
+    @ViewBuilder
+    private var recentModelsView: some View {
+        if let recentModels {
+            if recentModels.isEmpty {
+                Text("最近 7 天还没有 AI 请求").font(.caption).foregroundStyle(.secondary)
+            } else {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("最近 7 天实际用到的模型").font(.caption).foregroundStyle(.secondary)
+                    ForEach(recentModels.prefix(6)) { line in
+                        let claude = ModelCatalog.isClaude(line.id)
+                        HStack {
+                            Text(line.id)
+                            if claude {
+                                Text("Claude · 你定过选片不用").font(.caption2).foregroundStyle(.red)
+                            }
+                            Spacer()
+                            Text("\(line.calls) 次").monospacedDigit().foregroundStyle(.secondary)
+                        }
+                        .font(.caption)
+                        .foregroundStyle(claude ? .red : .primary)
+                    }
+                }
+            }
+        } else {
+            HStack(spacing: 6) {
+                ProgressView().controlSize(.small)
+                Text("正在读取最近用到的模型…").font(.caption).foregroundStyle(.secondary)
+            }
+        }
     }
 
     private var advancedHeader: some View {
@@ -150,7 +173,6 @@ struct AIServiceSettings: View {
             if showAdvanced {
                 Button {
                     ModelCatalog.resetToRecommended()
-                    autoFallback = true
                     revision += 1
                 } label: {
                     Label("恢复推荐", systemImage: "arrow.counterclockwise")
@@ -253,7 +275,7 @@ struct AIServiceSettings: View {
 
     private var modelSection: some View {
         VStack(alignment: .leading, spacing: 6) {
-            SectionLabel("每件事用哪个模型 · 不确定就保持「推荐」")
+            SectionLabel("每件事用哪个模型 · 不确定就保持「视觉修图」")
             VStack(spacing: 0) {
                 ForEach(Array(AIUse.allCases.enumerated()), id: \.element) { index, use in
                     if index > 0 { Divider() }
@@ -261,7 +283,7 @@ struct AIServiceSettings: View {
                 }
             }
             .groupBox()
-            Text("标「未测试」的模型还没用你的照片测过，效果和价格不确定。")
+            Text("列表和 Magpie「视觉修图」组里的模型一致。选单个模型时，出错不会自动换下一个。")
                 .font(.caption)
                 .foregroundStyle(.tertiary)
                 .padding(.horizontal, 4)
@@ -277,20 +299,12 @@ struct AIServiceSettings: View {
         }
     }
 
-    // MARK: - 高级：出问题时
-
-    private var fallbackSection: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            SectionLabel("出问题时")
-            SettingRow(symbol: "arrow.triangle.2.circlepath", tint: .red, title: "出错时自动换成推荐模型",
-                       detail: "批量选片不会中途停下，换过的会在「用量」里标出") {
-                Toggle("", isOn: $autoFallback).toggleStyle(.switch).labelsHidden()
-            }
-            .groupBox()
-        }
-    }
-
     // MARK: - 动作
+
+    private func loadRecentModels() async {
+        let report = try? await model.usageReport(since: Date().addingTimeInterval(-7 * 24 * 3600)).0
+        recentModels = (report?.byModel ?? []).sorted { $0.calls > $1.calls }
+    }
 
     private func check() async {
         probe = .checking
@@ -324,7 +338,7 @@ struct AIServiceSettings: View {
 
 // MARK: - 组件
 
-/// 一件事的模型选择：分段按钮式的候选，推荐的带标签，最后是「自定义…」
+/// 一件事的模型选择：下拉菜单（视觉修图 + 组里的各个模型 + 自定义…）
 private struct ModelRow: View {
     let use: AIUse
     let tint: Color
@@ -332,6 +346,8 @@ private struct ModelRow: View {
     @AppStorage private var value: String
     @State private var custom = false
     @State private var draft = ""
+
+    private static let customTag = "__custom__"
 
     init(use: AIUse, tint: Color, changed: @escaping () -> Void) {
         self.use = use
@@ -342,6 +358,7 @@ private struct ModelRow: View {
 
     private var options: [ModelOption] { ModelCatalog.options(for: use) }
     private var isCustom: Bool { custom || !options.contains { $0.id == value } }
+    private var selectedOption: ModelOption? { options.first { $0.id == value } }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -352,27 +369,37 @@ private struct ModelRow: View {
                     Text(use.detail).font(.caption).foregroundStyle(.secondary)
                 }
                 Spacer(minLength: 8)
-            }
-            HStack(spacing: 2) {
-                ForEach(options) { option in
-                    chip(option.name, tag: option.recommended ? "推荐" : nil, note: option.recommended ? nil : option.note,
-                         warning: option.discouraged, selected: !isCustom && value == option.id) {
-                        custom = false
-                        value = option.id
-                        changed()
+                Picker("", selection: Binding(
+                    get: { isCustom ? Self.customTag : value },
+                    set: { newValue in
+                        if newValue == Self.customTag {
+                            draft = isCustom ? value : ""
+                            custom = true
+                        } else {
+                            custom = false
+                            value = newValue
+                            changed()
+                        }
                     }
+                )) {
+                    ForEach(options) { option in
+                        Text(label(option)).tag(option.id)
+                    }
+                    Divider()
+                    Text("自定义…").tag(Self.customTag)
                 }
-                chip("自定义…", tag: nil, note: nil, warning: false, selected: isCustom) {
-                    draft = options.contains { $0.id == value } ? "" : value
-                    custom = true
-                }
+                .labelsHidden()
+                .frame(width: 220)
             }
-            .padding(2)
-            .background(Color.secondary.opacity(0.1), in: RoundedRectangle(cornerRadius: 8))
-            .padding(.leading, 36)
+            if let option = selectedOption, !isCustom, let warning = warning(option) {
+                Label(warning, systemImage: "exclamationmark.triangle")
+                    .font(.caption)
+                    .foregroundStyle(.orange)
+                    .padding(.leading, 36)
+            }
             if isCustom {
                 HStack(spacing: 6) {
-                    TextField("", text: $draft, prompt: Text(use == .image ? "会画图的模型名" : "能看图的模型名，如 codex/gpt-6.1-sol"))
+                    TextField("", text: $draft, prompt: Text(use == .image ? "会画图的模型名" : "能看图的模型名，如 codex/gpt-6-luna"))
                         .labelsHidden()
                         .onSubmit(applyDraft)
                     Button("使用", action: applyDraft)
@@ -392,80 +419,21 @@ private struct ModelRow: View {
         .onAppear { draft = isCustom ? value : "" }
     }
 
+    private func label(_ option: ModelOption) -> String {
+        option.recommended ? "\(option.name)（推荐）" : "\(option.name) · \(option.note)"
+    }
+
+    private func warning(_ option: ModelOption) -> String? {
+        if option.unavailable { return "这个模型现在调用不了：\(option.note)" }
+        if option.claude, use == .culling || use == .look { return "这是 Claude，你定过选片不用 Claude" }
+        return nil
+    }
+
     private func applyDraft() {
         let text = draft.trimmingCharacters(in: .whitespaces)
         guard !text.isEmpty else { return }
         value = text
         changed()
-    }
-
-    private func chip(_ title: String, tag: String?, note: String?, warning: Bool, selected: Bool, action: @escaping () -> Void) -> some View {
-        Button(action: action) {
-            HStack(spacing: 4) {
-                Text(title)
-                if let tag {
-                    Text(tag)
-                        .font(.system(size: 9, weight: .semibold))
-                        .padding(.horizontal, 4)
-                        .padding(.vertical, 1)
-                        .foregroundStyle(Color.accentColor)
-                        .background(Color.accentColor.opacity(0.15), in: RoundedRectangle(cornerRadius: 3))
-                }
-                if let note {
-                    Text(note).font(.system(size: 10)).foregroundStyle(warning ? .orange : .secondary)
-                }
-            }
-            .font(.caption)
-            .lineLimit(1)
-            .padding(.horizontal, 8)
-            .padding(.vertical, 4)
-            .foregroundStyle(selected ? .primary : .secondary)
-            .background(selected ? Color(nsColor: .controlBackgroundColor) : .clear, in: RoundedRectangle(cornerRadius: 6))
-            .shadow(color: .black.opacity(selected ? 0.12 : 0), radius: 0.5, y: 0.5)
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-    }
-}
-
-private struct TierCard: View {
-    let symbol: String
-    let tint: Color
-    let title: String
-    let detail: String
-    let price: String
-    let selected: Bool
-    let action: () -> Void
-
-    var body: some View {
-        Button(action: action) {
-            VStack(alignment: .leading, spacing: 6) {
-                HStack(alignment: .top) {
-                    IconTile(symbol: symbol, tint: tint, size: 26)
-                    Spacer()
-                    if selected {
-                        Image(systemName: "checkmark.circle.fill").foregroundStyle(Color.accentColor)
-                    }
-                }
-                Text(title).font(.headline)
-                Text(detail)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-                Spacer(minLength: 0)
-                Divider()
-                Text(price).font(.caption2).foregroundStyle(.secondary)
-            }
-            .padding(12)
-            .frame(maxWidth: .infinity, minHeight: 150, alignment: .topLeading)
-            .background(Color(nsColor: .controlBackgroundColor), in: RoundedRectangle(cornerRadius: 10))
-            .overlay {
-                RoundedRectangle(cornerRadius: 10)
-                    .strokeBorder(selected ? Color.accentColor : Color.secondary.opacity(0.25), lineWidth: selected ? 2 : 0.5)
-            }
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
     }
 }
 

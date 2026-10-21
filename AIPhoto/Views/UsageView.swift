@@ -104,7 +104,6 @@ struct UsageView: View {
     static func callDetail(_ line: UsageReport.Line) -> String {
         var parts: [String] = []
         if line.failures > 0 { parts.append("失败 \(line.failures) 次") }
-        if line.fallbacks > 0 { parts.append("自动换模型 \(line.fallbacks) 次") }
         return parts.isEmpty ? "全部成功" : parts.joined(separator: " · ")
     }
 

@@ -63,6 +63,11 @@ final class AppModel {
     var brushSize: CGFloat = 0.03
 
     var isBusy = false
+    /// 这批照片怎么处理（第 17 节）
+    var shootMode: ShootMode = .ai
+    /// 打开前等你选处理方式的文件夹；非 nil 时弹出选择
+    var pendingOpenFolder: URL?
+    var pendingOpenMode: ShootMode = .ai
     /// 当前的忙碌任务可以中途取消（AI 选片）
     var canCancelBusy = false
     private var busyTask: Task<Void, Never>?
@@ -133,6 +138,11 @@ final class AppModel {
     var retouchProgress: (done: Int, total: Int)?
     var showRetouchSummary = false
     var showRetouchStart = false
+    var showCleanupStart = false
+    /// 最近一次批量处理是一键去杂物（总结标题用）
+    var lastBatchOnlyCleanup = false
+    /// 模糊、闭眼等选片提示：只修图时不显示
+    var showsCullingHints: Bool { shootMode != .editOnly }
     /// 本轮队列里失败的任务，队列清空时统一提示
     private var cleanupFailures: [String] = []
     /// 同时向去杂物服务发出的请求数
@@ -212,13 +222,22 @@ final class AppModel {
         panel.prompt = "打开"
         panel.message = "选择一场拍摄的照片文件夹（支持 RAW + JPG）"
         guard panel.runModal() == .OK, let url = panel.url else { return }
-        load(url)
+        requestOpen(url)
     }
 
-    func load(_ folder: URL) {
+    /// 每次打开文件夹都先问这批照片怎么处理，默认选中这个文件夹上次用的方式
+    func requestOpen(_ folder: URL) {
         guard !isBusy else { return }
+        pendingOpenMode = (try? SessionStore.load(folder: folder))?.mode ?? .ai
+        pendingOpenFolder = folder
+    }
+
+    func load(_ folder: URL, mode: ShootMode) {
+        guard !isBusy else { return }
+        pendingOpenFolder = nil
+        shootMode = mode
         folderURL = folder
-        inspectorMode = .culling
+        inspectorMode = mode == .editOnly ? .editing : .culling
         UsageLog.shared.setShoot(folder.lastPathComponent)
         photos = [:]
         groups = []
@@ -258,13 +277,17 @@ final class AppModel {
 
             let savedGroups = saved?.groups ?? []
             let savedIDs = Set(savedGroups.flatMap(\.photoIDs))
-            if !savedGroups.isEmpty, savedIDs == Set(merged.keys), merged.values.allSatisfy({ $0.analysis != nil }) {
+            // 只修图存的是不分组的单组，换成选片方式时要重新分组
+            let groupsUsable = (saved?.mode == .editOnly) == (mode == .editOnly)
+            if groupsUsable, !savedGroups.isEmpty, savedIDs == Set(merged.keys), merged.values.allSatisfy({ $0.analysis != nil }) {
                 self.groups = savedGroups
+                if mode == .manual { self.clearAutoDecisions() }
                 self.selectGroup(savedGroups.first?.id)
             } else {
                 try await self.analyzeMissing()
                 try await self.regroupNow()
             }
+            self.scheduleSave()
         }
     }
 
@@ -322,6 +345,13 @@ final class AppModel {
     }
 
     private func regroupNow() async throws {
+        // 只修图：不按连拍分组，全部照片按拍摄时间放在一组
+        guard shootMode != .editOnly else {
+            groups = [Self.singleGroup(photos.values)]
+            selectGroup(groups.first?.id)
+            scheduleSave()
+            return
+        }
         statusText = "正在按连拍分组…"
         let list = Array(photos.values)
         let params = AppSettings.cullingParams
@@ -354,8 +384,7 @@ final class AppModel {
                 baseURL: baseURL,
                 apiKey: try await KeychainStore.loadIfSaved(account: AppSettings.keychainAccount) ?? "",
                 model: model,
-                purpose: purpose,
-                fallbackModel: ModelCatalog.fallback(for: use, current: model)
+                purpose: purpose
             )
         } catch {
             alert = AlertInfo(title: "读取 API 密钥失败", message: error.localizedDescription)
@@ -445,7 +474,43 @@ final class AppModel {
     }
 
     /// 没有被用户手动标记的照片：有 AI 结果按 AI 推荐，否则每组预选本地评分最高且无明显问题的一张
+    nonisolated static func singleGroup(_ photos: some Collection<Photo>) -> PhotoGroup {
+        let sorted = photos.sorted { ($0.captureDate ?? .distantPast, $0.fileName) < ($1.captureDate ?? .distantPast, $1.fileName) }
+        return PhotoGroup(id: 1, photoIDs: sorted.map(\.id))
+    }
+
+    /// 自己选片：清掉 App 替你预选的，你自己标的不动
+    private func clearAutoDecisions() {
+        for photo in photos.values where !photo.decidedByUser && photo.decision != .none {
+            photos[photo.id]?.decision = .none
+        }
+    }
+
+    /// 工具栏中途切换处理方式；你已经标过的选用 / 淘汰不丢
+    func switchMode(_ mode: ShootMode) {
+        guard mode != shootMode, !isBusy else { return }
+        let wasEditOnly = shootMode == .editOnly
+        shootMode = mode
+        switch mode {
+        case .editOnly:
+            inspectorMode = .editing
+            groups = [Self.singleGroup(photos.values)]
+            selectGroup(groups.first?.id)
+            scheduleSave()
+        case .manual, .ai:
+            if mode == .manual { clearAutoDecisions() }
+            if wasEditOnly {
+                perform("正在按连拍分组…") { try await self.regroupNow() }
+            } else {
+                if mode == .ai { applyAutoDecisions() }
+                scheduleSave()
+            }
+        }
+    }
+
+    /// 只有 AI 选片方式会替你预选
     private func applyAutoDecisions() {
+        guard shootMode == .ai else { return }
         for group in groups {
             let list = members(of: group)
             let hasAI = list.contains { $0.ai != nil }
@@ -494,7 +559,10 @@ final class AppModel {
     }
 
     func handleKey(_ characters: String) {
-        switch characters.lowercased() {
+        let key = characters.lowercased()
+        // 只修图：照片已经选好，选用、淘汰、星级的快捷键不生效
+        if shootMode == .editOnly, ["p", "x", "u", "0", "1", "2", "3", "4", "5"].contains(key) { return }
+        switch key {
         case "p": setDecision(.pick, for: decisionTargets)
         case "x": setDecision(.reject, for: decisionTargets)
         case "u": setDecision(.none, for: decisionTargets)
@@ -565,7 +633,8 @@ final class AppModel {
     }
 
     func exportFinishedJPEGs() {
-        let picked = photos.values.filter { $0.decision == .pick }
+        // 只修图：照片已经选好，导出全部
+        let picked = shootMode == .editOnly ? Array(photos.values) : photos.values.filter { $0.decision == .pick }
         guard !picked.isEmpty else {
             alert = AlertInfo(title: "还没有已选照片", message: "先选用照片（P），再导出成片。")
             return
@@ -575,7 +644,9 @@ final class AppModel {
         panel.canChooseFiles = false
         panel.canCreateDirectories = true
         panel.prompt = "导出到这里"
-        panel.message = "导出 \(picked.count) 张已选照片的调色成片（JPG，全尺寸）"
+        panel.message = shootMode == .editOnly
+            ? "导出全部 \(picked.count) 张照片的成片（JPG，全尺寸，只带上你修过的部分）"
+            : "导出 \(picked.count) 张已选照片的调色成片（JPG，全尺寸）"
         guard panel.runModal() == .OK, let destination = panel.url, let folder = folderURL else { return }
 
         perform("正在导出成片…") {
@@ -822,9 +893,20 @@ final class AppModel {
         Task { await runQuickRetouch(targets, preset: preset, note: note.trimmingCharacters(in: .whitespacesAndNewlines)) }
     }
 
-    private func runQuickRetouch(_ targets: [Photo], preset: RetouchPreset?, note: String) async {
+    /// 一键去杂物（自己选片时用）：只让 AI 找出路人、垃圾、杂物并去掉，不调色、不磨皮
+    func startBatchCleanup() {
+        let targets = photos.values.filter { $0.decision == .pick }.sorted { $0.id < $1.id }
+        guard !targets.isEmpty else {
+            alert = AlertInfo(title: "还没有已选照片", message: "先选用照片（P），再一键去杂物。")
+            return
+        }
+        Task { await runQuickRetouch(targets, preset: nil, note: "", onlyCleanup: true) }
+    }
+
+    private func runQuickRetouch(_ targets: [Photo], preset: RetouchPreset?, note: String, onlyCleanup: Bool = false) async {
         guard let client = await makeVisionClient(use: .locate, purpose: .locate) else { return }
-        recordUndo(.edit, ids: targets.map(\.id), label: "一键初修")
+        lastBatchOnlyCleanup = onlyCleanup
+        recordUndo(.edit, ids: targets.map(\.id), label: onlyCleanup ? "一键去杂物" : "一键初修")
         for photo in targets { photos[photo.id]?.retouchLog = RetouchLog() }
         retouchProgress = (0, targets.count)
         lastLookSummary = nil
@@ -832,7 +914,7 @@ final class AppModel {
         lastRetouchWindow = nil
         // 选了预设或写了诉求：所有照片按预设重新调色（用户确认，手动修过的也重做，可撤销）；否则沿用原来的自动调色
         let usesPreset = preset != nil || !note.isEmpty
-        if usesPreset {
+        if usesPreset, !onlyCleanup {
             statusText = note.isEmpty ? "按预设调色中…" : "AI 正在理解本场诉求…"
             await recolor(targets.map(\.id), preset: preset, note: note)
             statusText = ""
@@ -844,7 +926,8 @@ final class AppModel {
                 guard next < targets.count else { return }
                 let photo = targets[next]
                 next += 1
-                group.addTask { await self.retouch(photo, adjustsColor: !usesPreset, client: client) }
+                // 一键去杂物不调色：adjustsColor 为 false 时只记录问题并去杂物
+                group.addTask { await self.retouch(photo, adjustsColor: !usesPreset && !onlyCleanup, client: client) }
             }
             // 每张要调用看图模型定位干扰物，并发 3 个
             for _ in 0..<min(3, targets.count) { enqueue() }
@@ -1162,6 +1245,7 @@ final class AppModel {
     ) {
         let messageID = UUID()
         var step = ChatStep(changes: [])
+        step.model = plan.model
         if !plan.adjust.isEmpty {
             // 在最新的参数上改，期间摄影师手动拖过的滑块不被覆盖
             let before = photos[id]?.edit
@@ -1541,7 +1625,7 @@ final class AppModel {
     private func scheduleSave() {
         saveTask?.cancel()
         guard let folder = folderURL else { return }
-        let session = Session(photos: Array(photos.values), groups: groups)
+        let session = Session(photos: Array(photos.values), groups: groups, mode: shootMode)
         saveTask = Task {
             try? await Task.sleep(for: .seconds(1))
             guard !Task.isCancelled else { return }

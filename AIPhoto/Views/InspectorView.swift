@@ -8,12 +8,17 @@ struct InspectorView: View {
         if let session = model.composite {
             CompositePanel(session: session)
         } else if let photo = model.selectedPhoto {
-            VStack(spacing: 0) {
-                modePicker
-                Divider()
-                switch model.inspectorMode {
-                case .culling: CullingInspector(photo: photo)
-                case .editing: EditingInspector(photo: photo)
+            // 只修图：照片已经选好，只有修图
+            if model.shootMode == .editOnly {
+                EditingInspector(photo: photo)
+            } else {
+                VStack(spacing: 0) {
+                    modePicker
+                    Divider()
+                    switch model.inspectorMode {
+                    case .culling: CullingInspector(photo: photo)
+                    case .editing: EditingInspector(photo: photo)
+                    }
                 }
             }
         } else {

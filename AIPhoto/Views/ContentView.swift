@@ -80,46 +80,85 @@ struct ContentView: View {
         .onAppear { viewerFocused = true }
         .dropDestination(for: URL.self) { urls, _ in
             guard let folder = urls.first(where: \.hasDirectoryPath), !model.isBusy else { return false }
-            model.load(folder)
+            model.requestOpen(folder)
             return true
         }
         .toolbar {
+            // 每个按钮都显示「图标 + 中文」（第 17 节：只有图标时「AI 选片」和「一键初修」分不清）
             ToolbarItemGroup(placement: .primaryAction) {
                 Button {
                     model.openFolder()
                 } label: {
-                    Label("打开文件夹", systemImage: "folder")
+                    Label("打开", systemImage: "folder")
                 }
                 .disabled(model.isBusy)
+                .help("打开一场拍摄的照片文件夹")
+
+                if model.folderURL != nil {
+                    Menu {
+                        ForEach(ShootMode.allCases) { mode in
+                            Button {
+                                model.switchMode(mode)
+                            } label: {
+                                if mode == model.shootMode { Image(systemName: "checkmark") }
+                                Text(mode.title)
+                            }
+                        }
+                    } label: {
+                        // 带「方式：」前缀，和「AI 选片」按钮区分开（实测同名同图标时看起来像重复按钮）
+                        Label("方式：\(model.shootMode.title)", systemImage: "rectangle.stack.badge.person.crop")
+                    }
+                    .disabled(model.isBusy)
+                    .help("这批照片怎么处理；切换不会清掉已经标过的选用、淘汰")
+                }
+
+                if model.shootMode == .ai {
+                    Menu {
+                        Button("AI 选片（只处理还没评估的组）") { model.runAI(all: false) }
+                        Button("全部重新 AI 选片") { model.runAI(all: true) }
+                    } label: {
+                        Label("AI 选片", systemImage: "checkmark.rectangle.stack")
+                    } primaryAction: {
+                        model.runAI(all: false)
+                    }
+                    .disabled(model.groups.isEmpty || model.isBusy)
+                    .help("把每组候选照片发给 AI，挑出最值得交付的")
+
+                    Button {
+                        model.showRetouchStart = true
+                    } label: {
+                        Label("一键初修", systemImage: "paintpalette")
+                    }
+                    .disabled(model.pickedCount == 0 || model.retouchProgress != nil)
+                    .help("对所有已选照片全自动初修：调色、皮肤轻度柔化、去背景杂物，完成后给出总结")
+                }
+
+                if model.shootMode == .manual {
+                    Button {
+                        model.showCleanupStart = true
+                    } label: {
+                        Label("一键去杂物", systemImage: "eraser")
+                    }
+                    .disabled(model.pickedCount == 0 || model.retouchProgress != nil)
+                    .help("对所有已选照片去掉路人、垃圾、杂物；不调色、不磨皮")
+                }
+
+                if model.shootMode != .editOnly {
+                    Toggle(isOn: Binding(get: { model.gridMode }, set: { _ in model.toggleGrid() })) {
+                        Label("网格", systemImage: "square.grid.3x3")
+                    }
+                    .help("G：一屏看完整场照片，可框选批量选用 / 淘汰")
+                    .disabled(model.groups.isEmpty)
+                }
 
                 Menu {
-                    Button("AI 选片（只处理还没评估的组）") { model.runAI(all: false) }
-                    Button("全部重新 AI 选片") { model.runAI(all: true) }
-                } label: {
-                    Label("AI 选片", systemImage: "sparkles")
-                } primaryAction: {
-                    model.runAI(all: false)
-                }
-                .disabled(model.groups.isEmpty || model.isBusy)
-                .help("把每组候选照片发给 AI 选片模型，挑出最值得交付的")
-
-                Toggle(isOn: Binding(get: { model.gridMode }, set: { _ in model.toggleGrid() })) {
-                    Label("网格总览", systemImage: "square.grid.3x3")
-                }
-                .help("G：一屏看完整场照片，可框选批量选用 / 淘汰")
-                .disabled(model.groups.isEmpty)
-
-                Button {
-                    model.showRetouchStart = true
-                } label: {
-                    Label("一键初修", systemImage: "wand.and.stars.inverse")
-                }
-                .disabled(model.pickedCount == 0 || model.retouchProgress != nil)
-                .help("对所有已选照片全自动初修：调色、皮肤轻度柔化、去背景杂物，完成后给出总结")
-
-                Menu {
-                    Button("把选片结果写入 RAW 的 XMP 星级") { model.writeXMP() }
-                    Button("拷贝已选照片到文件夹…") { model.copyPicked() }
+                    if model.shootMode == .editOnly {
+                        Button("导出全部成片（JPG）…") { model.exportFinishedJPEGs() }
+                    } else {
+                        Button("导出已选成片（JPG）…") { model.exportFinishedJPEGs() }
+                        Button("把选片结果写入 RAW 的 XMP 星级") { model.writeXMP() }
+                        Button("拷贝已选照片到文件夹…") { model.copyPicked() }
+                    }
                 } label: {
                     Label("导出", systemImage: "square.and.arrow.up")
                 }
@@ -130,7 +169,23 @@ struct ContentView: View {
                 } label: {
                     Label("详情", systemImage: "sidebar.right")
                 }
+                .help("显示或隐藏右侧面板")
             }
+        }
+        .labelStyle(.titleAndIcon)
+        .sheet(isPresented: Binding(
+            get: { model.pendingOpenFolder != nil },
+            set: { if !$0 { model.pendingOpenFolder = nil } }
+        )) {
+            if let folder = model.pendingOpenFolder {
+                ShootModeSheet(folder: folder, initial: model.pendingOpenMode).environment(model)
+            }
+        }
+        .confirmationDialog("一键去杂物 \(model.pickedCount) 张已选照片", isPresented: $model.showCleanupStart) {
+            Button("开始去杂物") { model.startBatchCleanup() }
+            Button("取消", role: .cancel) {}
+        } message: {
+            Text("AI 找出路人、垃圾、推车、电线等背景杂物并去掉；孩子手里的东西不动。不调色、不磨皮。全程在后台进行，每张约 30～60 秒，完成后给出总结。")
         }
         .sheet(isPresented: $model.showRetouchStart) { RetouchStartSheet().environment(model) }
         .sheet(isPresented: $model.showPresetManager) { PresetManagerSheet().environment(model) }
@@ -165,7 +220,9 @@ struct StatusBar: View {
                     .help("停止 AI 选片，已完成的结果保留（⌘.）")
                 }
             } else if !model.groups.isEmpty {
-                Text("← → 切换照片　↑ ↓ 切换组　P 选用　X 淘汰　U 取消　1-5 星级　空格 放大人脸　F 人脸框　A 自动调色　\\ 修复前后对比　B 画笔去杂物　Z 缩放　K 合焦高亮　J 过曝提示　G 网格总览")
+                Text(model.shootMode == .editOnly
+                     ? "← → 切换照片　空格 放大人脸　F 人脸框　A 自动调色　\\ 修复前后对比　B 画笔去杂物　Z 缩放　K 合焦高亮　J 过曝提示"
+                     : "← → 切换照片　↑ ↓ 切换组　P 选用　X 淘汰　U 取消　1-5 星级　空格 放大人脸　F 人脸框　A 自动调色　\\ 修复前后对比　B 画笔去杂物　Z 缩放　K 合焦高亮　J 过曝提示　G 网格总览")
                     .foregroundStyle(.secondary)
             }
             Spacer()

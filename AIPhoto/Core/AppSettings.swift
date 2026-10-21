@@ -12,8 +12,6 @@ enum AppSettings {
     static let distanceKey = "burstMaxDistance"
 
     static let usdToCnyKey = "usdToCny"
-    /// 选的模型出错时自动换成推荐模型重试一次
-    static let autoFallbackKey = "aiAutoFallback"
     static let defaultBaseURL = "http://127.0.0.1:3425/v1"
 
     static func registerDefaults() {
@@ -24,7 +22,6 @@ enum AppSettings {
         UserDefaults.standard.register(defaults: [
             modelKey: ModelCatalog.recommended(for: .culling),
             usdToCnyKey: 7.2,
-            autoFallbackKey: true,
             chatModelKey: ModelCatalog.recommended(for: .chat),
             baseURLKey: defaultBaseURL,
             perGroupKey: 6,
@@ -38,7 +35,6 @@ enum AppSettings {
     static var usdToCny: Double { UserDefaults.standard.double(forKey: usdToCnyKey) }
     static var baseURL: String { UserDefaults.standard.string(forKey: baseURLKey) ?? defaultBaseURL }
     static var perGroup: Int { UserDefaults.standard.integer(forKey: perGroupKey) }
-    static var autoFallback: Bool { UserDefaults.standard.bool(forKey: autoFallbackKey) }
 
     static var cullingParams: Culling.Params {
         let defaults = UserDefaults.standard

@@ -170,8 +170,46 @@ struct PhotoGroup: Identifiable, Codable, Hashable {
     var photoIDs: [String]
 }
 
+/// 这批照片怎么处理，打开文件夹时选（需求清单第 17 节）
+enum ShootMode: String, Codable, CaseIterable, Identifiable {
+    /// AI 帮忙选片：打开后每组预选一张，AI 选完按 AI 推荐
+    case ai
+    /// 自己选片：不预选，只提示模糊、闭眼
+    case manual
+    /// 已在别处选好、调好色，只来修杂物和瑕疵：不分组、不选片、不自动修
+    case editOnly
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .ai: "AI 选片"
+        case .manual: "自己选片"
+        case .editOnly: "已选好，只修图"
+        }
+    }
+
+    var detail: String {
+        switch self {
+        case .ai: "AI 帮你挑每组最好的，可以一键初修（调色、磨皮、去杂物）"
+        case .manual: "你自己挑，不替你预选；只提示模糊、闭眼。可以一键去杂物（不调色、不磨皮）"
+        case .editOnly: "照片已经选好、调好色，只来去路人、垃圾、瑕疵。不分组，全部手动修，不会自动改颜色"
+        }
+    }
+
+    var symbol: String {
+        switch self {
+        case .ai: "checkmark.rectangle.stack"
+        case .manual: "hand.point.up.left"
+        case .editOnly: "paintbrush.pointed"
+        }
+    }
+}
+
 struct Session: Codable {
     var version = 1
     var photos: [Photo]
     var groups: [PhotoGroup]
+    /// 旧记录没有，按 AI 选片处理
+    var mode: ShootMode?
 }

@@ -157,7 +157,8 @@ struct GridCell: View {
                     } else if photo.retouchLog != nil {
                         Text("已初修").badgeStyle(.teal)
                     }
-                    ForEach(photo.flags.sorted { $0.rawValue < $1.rawValue }, id: \.self) { flag in
+                    // 只修图时不显示选片提示
+                    ForEach(model.showsCullingHints ? photo.flags.sorted { $0.rawValue < $1.rawValue } : [], id: \.self) { flag in
                         Text(flag.label).badgeStyle(.orange)
                     }
                 }

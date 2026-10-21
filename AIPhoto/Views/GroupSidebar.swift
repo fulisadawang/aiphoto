@@ -4,8 +4,49 @@ struct GroupSidebar: View {
     @Environment(AppModel.self) private var model
 
     var body: some View {
+        if model.shootMode == .editOnly {
+            photoList
+        } else {
+            groupList
+        }
+    }
+
+    /// 只修图：不分组，所有照片一个列表
+    private var photoList: some View {
+        let photos = model.groups.flatMap { model.members(of: $0) }
+        return VStack(alignment: .leading, spacing: 0) {
+            Text("全部照片 \(photos.count) 张")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .padding(.horizontal, 12)
+                .padding(.vertical, 8)
+            List(selection: Binding(
+                get: { model.selectedPhotoID },
+                set: { if let id = $0 { model.selectPhoto(id) } }
+            )) {
+                ForEach(photos) { photo in
+                    HStack(spacing: 10) {
+                        Thumbnail(url: photo.displayURL, size: CGSize(width: 64, height: 48))
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text(photo.fileName).fontWeight(.medium)
+                            if model.isCleaning(photo.id) {
+                                Text("修复中").font(.caption).foregroundStyle(.blue)
+                            } else if photo.edit != nil || photo.cleanups != nil {
+                                Text("已修").font(.caption).foregroundStyle(.secondary)
+                            }
+                        }
+                    }
+                    .padding(.vertical, 2)
+                    .tag(Optional(photo.id))
+                }
+            }
+            .listStyle(.sidebar)
+        }
+    }
+
+    private var groupList: some View {
         @Bindable var model = model
-        VStack(spacing: 0) {
+        return VStack(spacing: 0) {
             Picker("筛选", selection: $model.filter) {
                 ForEach(AppModel.Filter.allCases) { Text($0.rawValue).tag($0) }
             }

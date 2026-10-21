@@ -54,71 +54,45 @@ struct ModelOption: Identifiable, Hashable {
     let name: String
     let note: String
     var recommended = false
-    var discouraged = false
+    /// 用户定过选片不用 Claude：照样列出，选片时提醒
+    var claude = false
+    /// 实测调用不了（如 Cursor 免费版限制），照样列出，标原因
+    var unavailable = false
 }
 
 enum ModelCatalog {
-    /// Magpie 的「视觉修图」路由组（2026-10-20 新增，当时路由到 gpt-5.6-luna）。
+    /// Magpie 的「视觉修图」路由组：按 Magpie 里的顺序用模型，出错由 Magpie 换下一个。
     /// 实拍验证：31 张 AI 选片 18 秒全部完成、理由符合亲子纪实标准；找杂物的人、推车、桌子框得准，不碰孩子
     static let visionRetouch = "group/vision-retouch"
-    /// 原推荐。2026-10-20 起 Antigravity 经常无容量、请求超时，改为备用
+    /// 旧推荐，只用于把旧设置迁移到视觉修图组
     static let gemini = "group/auto-gemini-3-8-flash"
-    static let glm = "workbuddy/glm-5v-turbo"
-    static let gptSol = "codex/gpt-6.1-sol"
 
-    /// 推荐和 Gemini 实测过；其他候选按用户决定先不实测，标「未测试」（需求清单第 14 节）
+    /// 「视觉修图」组里的具体模型，顺序与 Magpie 里一致（用户 2026-10-21 要求全部列进下拉列表，需求清单第 18 节）。
+    /// 2026-10-21 实测：两个 GPT 和 Gemini 能用；Grok 返回 Cursor 免费版不能用指定模型
+    static let groupModels: [ModelOption] = [
+        ModelOption(id: "codex/gpt-5.6-luna", name: "GPT-5.6-Luna", note: "Codex"),
+        ModelOption(id: "codex/gpt-6-luna", name: "GPT-6-Luna", note: "Codex"),
+        ModelOption(id: "antigravity/gemini-3.8-flash", name: "Gemini 3.8 Flash", note: "Antigravity"),
+        ModelOption(id: "antigravity/claude-sonnet-4-6", name: "Claude Sonnet 4.6 (Thinking)", note: "Antigravity", claude: true),
+        ModelOption(id: "cursor/grok-4.7@256k", name: "Grok 4.7 @ 256k", note: "Cursor 免费版目前用不了", unavailable: true),
+        ModelOption(id: "cursor/grok-4.7@500k", name: "Grok 4.7 @ 500k", note: "Cursor 免费版目前用不了", unavailable: true),
+        ModelOption(id: "cursor/claude-opus-5-5@300k", name: "Claude Opus 5.5 @ 300k", note: "Cursor", claude: true),
+        ModelOption(id: "cursor/claude-opus-5-5@1m", name: "Claude Opus 5.5 @ 1m", note: "Cursor", claude: true),
+        ModelOption(id: "cursor/claude-opus-5@300k", name: "Claude Opus 5 @ 300k", note: "Cursor", claude: true),
+        ModelOption(id: "cursor/claude-opus-5@1m", name: "Claude Opus 5 @ 1m", note: "Cursor", claude: true),
+        ModelOption(id: "antigravity/claude-opus-4-6-thinking", name: "Claude Opus 4.6 (Thinking)", note: "Antigravity", claude: true),
+    ]
+
     static func options(for use: AIUse) -> [ModelOption] {
         switch use {
-        case .culling:
-            [
-                ModelOption(id: visionRetouch, name: "视觉修图", note: "推荐", recommended: true),
-                ModelOption(id: gemini, name: "Gemini 3.8 Flash", note: "备用 · 常无响应"),
-                ModelOption(id: glm, name: "GLM-5V Turbo", note: "未测试"),
-                ModelOption(id: gptSol, name: "GPT-6.1 Sol", note: "未测试"),
-            ]
-        case .locate:
-            [
-                ModelOption(id: visionRetouch, name: "视觉修图", note: "推荐 · 定位准", recommended: true),
-                ModelOption(id: gemini, name: "Gemini 3.8 Flash", note: "备用 · 常无响应"),
-                ModelOption(id: gptSol, name: "GPT-6.1 Sol", note: "未测试"),
-                // 不用 auto-auto：实测会被路由到 Claude（用户明确不用 Claude），而且对话改图 3 次都把小狗框到木门上
-                ModelOption(id: "group/auto-auto", name: "auto-auto", note: "不建议 · 框不准", discouraged: true),
-            ]
-        case .chat:
-            [
-                ModelOption(id: visionRetouch, name: "视觉修图", note: "推荐", recommended: true),
-                ModelOption(id: gemini, name: "Gemini 3.8 Flash", note: "备用 · 常无响应"),
-                ModelOption(id: gptSol, name: "GPT-6.1 Sol", note: "未测试"),
-            ]
+        case .culling, .locate, .chat:
+            [ModelOption(id: visionRetouch, name: "视觉修图", note: "推荐 · Magpie 组，按顺序自动换", recommended: true)] + groupModels
         case .look:
-            [ModelOption(id: "", name: "同 AI 选片", note: "推荐", recommended: true)]
+            [ModelOption(id: "", name: "同 AI 选片", note: "推荐", recommended: true)] + groupModels
         case .image:
             // Magpie 不传模型时用 gpt-image-2；传 auto-auto 会被路由到只回文字的模型
             [ModelOption(id: "", name: "gpt-image-2", note: "推荐 · 服务默认", recommended: true)]
         }
-    }
-
-    /// 设置页的三个档位。省钱和效果优先的组合还没用实拍测过（用户要求先开放）：
-    /// 省钱只把选片换成更便宜的模型，找杂物和改图仍用定位准的推荐模型，避免框偏擦到孩子
-    enum Tier: CaseIterable {
-        case saving, recommended, best
-
-        func model(for use: AIUse) -> String {
-            switch (self, use) {
-            case (_, .image), (_, .look), (.recommended, _): ModelCatalog.recommended(for: use)
-            case (.saving, .culling): glm
-            case (.saving, _): ModelCatalog.recommended(for: use)
-            case (.best, _): gptSol
-            }
-        }
-    }
-
-    static var currentTier: Tier? {
-        Tier.allCases.first { tier in AIUse.allCases.allSatisfy { stored($0) == tier.model(for: $0) } }
-    }
-
-    static func apply(_ tier: Tier) {
-        for use in AIUse.allCases { UserDefaults.standard.set(tier.model(for: use), forKey: use.key) }
     }
 
     static func recommended(for use: AIUse) -> String {
@@ -136,15 +110,16 @@ enum ModelCatalog {
         return value
     }
 
-    static func resetToRecommended() { apply(.recommended) }
-
-    /// 出错时换用的模型：用的不是推荐模型时换推荐模型；用的就是推荐模型时换 Gemini 备用
-    static func fallback(for use: AIUse, current: String) -> String? {
-        let recommended = recommended(for: use == .look ? .culling : use)
-        guard AppSettings.autoFallback, !recommended.isEmpty else { return nil }
-        let backup = recommended == current ? gemini : recommended
-        return backup == current ? nil : backup
+    static var isAllRecommended: Bool {
+        AIUse.allCases.allSatisfy { stored($0) == recommended(for: $0) }
     }
+
+    static func resetToRecommended() {
+        for use in AIUse.allCases { UserDefaults.standard.set(recommended(for: use), forKey: use.key) }
+    }
+
+    /// 实际回答的模型名（Magpie 返回的 model，如 gpt-5.6-luna）是不是 Claude
+    static func isClaude(_ model: String) -> Bool { model.lowercased().contains("claude") }
 
     static func displayName(_ id: String, use: AIUse) -> String {
         options(for: use).first { $0.id == id }?.name ?? id

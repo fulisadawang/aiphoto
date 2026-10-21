@@ -67,8 +67,9 @@ struct ChatPanel: View {
                     model.chatModelOverride = option.id == ModelCatalog.model(for: .chat) ? nil : option.id
                 } label: {
                     if option.id == currentModel { Image(systemName: "checkmark") }
-                    Text(option.name + "（" + option.note + "）")
+                    Text(option.name + "（" + (option.claude ? "Claude · " : "") + option.note + "）")
                 }
+                .disabled(option.unavailable)
             }
             Divider()
             Button("其他模型…") {
@@ -258,6 +259,13 @@ private struct ResultCard: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
+            }
+            if let model = step.model {
+                // 视觉修图是路由组，显示这次 Magpie 实际交给了哪个模型
+                let claude = ModelCatalog.isClaude(model)
+                Label(claude ? "由 \(model) 回答 · 这是 Claude" : "由 \(model) 回答", systemImage: "sparkles")
+                    .font(.caption2)
+                    .foregroundStyle(claude ? Color.red : Color.secondary)
             }
             if step.pending > 0, !step.undone {
                 HStack(spacing: 6) {
