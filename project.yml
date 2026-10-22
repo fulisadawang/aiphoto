@@ -56,8 +56,8 @@ targets:
         SWIFT_VERSION: "5.0"
         # Compositor 的修复画笔和内容识别填充是 C 代码（Vendor/Compositor），经桥接头给 Swift 调用
         SWIFT_OBJC_BRIDGING_HEADER: AIPhoto/AIPhoto-Bridging-Header.h
-        MARKETING_VERSION: "0.9.2"
-        CURRENT_PROJECT_VERSION: "16"
+        MARKETING_VERSION: "0.10.0"
+        CURRENT_PROJECT_VERSION: "17"
         GENERATE_INFOPLIST_FILE: NO
         # 仅自用：本机临时签名，不开沙盒，便于直接读写照片文件夹
         CODE_SIGN_IDENTITY: "-"

@@ -3,6 +3,22 @@
     <channel>
         <title>AIPhoto</title>
         <item>
+            <title>0.10.0</title>
+            <pubDate>Thu, 22 Oct 2026 23:39:43 +0800</pubDate>
+            <sparkle:version>17</sparkle:version>
+            <sparkle:shortVersionString>0.10.0</sparkle:shortVersionString>
+            <sparkle:minimumSystemVersion>15.0</sparkle:minimumSystemVersion>
+            <sparkle:hardwareRequirements>arm64</sparkle:hardwareRequirements>
+            <description sparkle:format="markdown"><![CDATA[# 0.10.0
+
+- 祛瑕疵：人像工具新增「点修」，在大图上点一下修掉蚊子包、抓痕、饭粒，拖动涂一片；「自动找斑」把脸上可疑的点画圈列出来，点了才修。全部在本机即时完成
+- 本机去小杂物：小件杂物在本机一两秒去掉，不花钱；大的或周围有窗框栏杆的照旧交给 AI。去杂物列表标明每处是本机还是 AI，可以换一种方式重来或删掉
+- 模型下拉列表改为读取当前连接的 Magpie 实际有的模型，不再写死；在别的电脑上用自己的 Magpie 也能正确选模型
+- 连不上 AI 时的提示更清楚：127.0.0.1 只指这台电脑自己；从别的电脑连要填地址和密钥；被代理软件挡住时会提示
+]]></description>
+            <enclosure url="https://github.com/fulisadawang/aiphoto/releases/download/v0.10.0/AIPhoto-0.10.0.zip" length="5888053" type="application/octet-stream" sparkle:edSignature="YgcoHKuGEYG4IIfPZQQrwiTaLgtBUc6Vw7xiOeELKHciIDWLzLQif7f6jMZO2GUSxpsvVIosvjCkUPOYOF+fAw=="/>
+        </item>
+        <item>
             <title>0.9.2</title>
             <pubDate>Thu, 22 Oct 2026 00:12:24 +0800</pubDate>
             <sparkle:version>16</sparkle:version>
@@ -33,30 +49,6 @@
 - 用本机 Magpie（不需要密钥）的不受影响
 ]]></description>
             <enclosure url="https://github.com/fulisadawang/aiphoto/releases/download/v0.9.1/AIPhoto-0.9.1.zip" length="5733262" type="application/octet-stream" sparkle:edSignature="XotMkO6BXHgLTntjjDszEnBy3prGak2LVP0LJzF/AEmNV9h+pqq6hnxeR7FOeejVJisRMcZVGTp/80MIQWaFAQ=="/>
-        </item>
-        <item>
-            <title>0.9.0</title>
-            <pubDate>Wed, 21 Oct 2026 17:01:20 +0800</pubDate>
-            <sparkle:version>14</sparkle:version>
-            <sparkle:shortVersionString>0.9.0</sparkle:shortVersionString>
-            <sparkle:minimumSystemVersion>15.0</sparkle:minimumSystemVersion>
-            <sparkle:hardwareRequirements>arm64</sparkle:hardwareRequirements>
-            <description sparkle:format="markdown"><![CDATA[## 打开文件夹时先选「这批照片怎么处理」
-
-- **AI 选片**：和以前一样，AI 帮你挑，可以一键初修（调色、磨皮、去杂物）
-- **自己选片**：不替你预选，只提示模糊、闭眼；工具栏有「一键去杂物」，只去路人、垃圾、杂物，**不调色、不磨皮**
-- **已选好，只修图**：适合已经调好色的成片，不分组、不选片，全部手动修，不会自动改颜色；导出全部照片
-- 工具栏可以随时切换方式，已标的选用、淘汰不会丢
-
-## 工具栏
-- 所有按钮改成「图标 + 中文」，AI 选片和一键初修不再长得一样
-
-## 模型选择
-- AI 选片、找杂物、对话改图的模型改成下拉列表，列出 Magpie「视觉修图」组里的全部模型（Claude 会标出来）
-- 去掉了「省钱 / 推荐 / 效果优先」和 App 自己的出错换模型，统一交给 Magpie 的「视觉修图」组按顺序切换
-- 设置页显示最近 7 天实际用到的模型；对话改图的每张结果卡片显示这次是哪个模型回答的
-]]></description>
-            <enclosure url="https://github.com/fulisadawang/aiphoto/releases/download/v0.9.0/AIPhoto-0.9.0.zip" length="5729481" type="application/octet-stream" sparkle:edSignature="ku2qtxYk2sHCIQz6nFbZOHngYZfmpaLARZ6bAu2ldUPrBKETDZCi/EROuqvR0fVV/C1LlyR8+UpIbacWcHmcCA=="/>
         </item>
     </channel>
 </rss>
