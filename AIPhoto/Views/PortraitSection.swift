@@ -35,6 +35,7 @@ struct PortraitSection: View {
                     .controlSize(.small)
             }
         }
+        blemishSection
         if !faces.isEmpty {
             Section("皮肤") {
                 slider("磨皮", amounts.skin) { $0.skin = $1 }
@@ -54,6 +55,68 @@ struct PortraitSection: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
+        }
+    }
+
+    /// 祛瑕疵：点修 / 涂抹，自动找斑只画圈不自动修（第 19.1 节）
+    private var blemishSection: some View {
+        let spots = model.blemishSpots[photo.id] ?? []
+        let healed = (photo.cleanups ?? []).filter { $0.name == CleanupEngine.blemishName }
+        let finding = model.findingBlemishPhotoIDs.contains(photo.id)
+        return Section {
+            HStack {
+                Toggle(isOn: Binding(get: { model.blemishMode }, set: { _ in model.toggleBlemishMode() })) {
+                    Label("点修", systemImage: "bandage")
+                }
+                .toggleStyle(.button)
+                .help("在大图上点一下修一个点，按住拖动涂一片；本机即时修，不花钱")
+                Button {
+                    model.findBlemishes()
+                } label: {
+                    Label("自动找斑", systemImage: "sparkle.magnifyingglass")
+                }
+                .disabled(faces.isEmpty || finding)
+                .help("在脸上找蚊子包、抓痕、痘，画圈列出来，你点了才修")
+            }
+            .buttonStyle(.bordered)
+            if model.blemishMode {
+                VStack(alignment: .leading, spacing: 2) {
+                    HStack {
+                        Text("点修大小")
+                        Spacer()
+                        Text(String(format: "%.1f%%", model.blemishSize * 100))
+                            .monospacedDigit()
+                            .foregroundStyle(.secondary)
+                    }
+                    Slider(value: Binding(get: { model.blemishSize }, set: { model.blemishSize = $0 }), in: 0.003...0.05)
+                        .controlSize(.small)
+                }
+            }
+            if finding {
+                HStack(spacing: 6) {
+                    ProgressView().controlSize(.small)
+                    Text("正在找…").font(.caption).foregroundStyle(.secondary)
+                }
+            }
+            if !spots.isEmpty {
+                HStack {
+                    Text("找到 \(spots.count) 处，点圈修掉")
+                    Spacer()
+                    Button("全部修") { model.healAllSpots() }
+                    Button("全部清除") { model.clearSpots() }
+                }
+                .controlSize(.small)
+            }
+            if !healed.isEmpty {
+                Text("已修 \(healed.count) 处")
+                ForEach(healed.reversed()) { PatchRow(patch: $0) }
+            }
+        } header: {
+            Text("祛瑕疵")
+        } footer: {
+            Text("痣和雀斑不会自动修；某一处不自然可以点「用 AI 重来」（会花钱）。")
+                .font(.caption)
+                .foregroundStyle(.secondary)
         }
     }
 

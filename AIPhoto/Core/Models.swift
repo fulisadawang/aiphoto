@@ -157,10 +157,23 @@ struct CleanupPatch: Codable, Identifiable, Equatable {
     let id: UUID
     /// 归一化区域（原点左上），相对于方向校正后的整张照片
     var rect: CGRect
+    /// 本机补的还是 AI 画的；旧记录和合成结果没有
+    var method: CleanupMethod? = nil
+    /// 当时的笔迹，「用 AI 重来 / 用本机重来」时照原位置再做一次；旧记录没有
+    var strokes: [BrushStroke]? = nil
+    /// 去掉的是什么（如「右侧婴儿车」）；手动涂抹为 nil
+    var name: String? = nil
+}
+
+/// 去杂物、祛瑕疵用什么补：本机（Compositor 的修复算法）还是 AI（gpt-image）
+enum CleanupMethod: String, Codable {
+    case local, ai
+
+    var title: String { self == .local ? "本机" : "AI" }
 }
 
 /// 画笔笔迹，坐标归一化（原点左上），半径以画面宽度为单位
-struct BrushStroke: Equatable {
+struct BrushStroke: Codable, Equatable {
     var points: [CGPoint]
     var radius: CGFloat
 }

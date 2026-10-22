@@ -45,6 +45,8 @@ struct PhotoViewer: View {
                             }
                         } else if model.brushMode {
                             BrushOverlay()
+                        } else if model.blemishMode || !(model.blemishSpots[photo.id] ?? []).isEmpty {
+                            BlemishOverlay(photoID: photo.id)
                         } else if model.inspectorMode == .editing, model.editTool == .portrait,
                                   let faces = photo.analysis?.faces, faces.count > 1 {
                             PortraitFaceOverlay(faces: faces)
@@ -281,6 +283,69 @@ struct RetouchBadge: View {
         } else if photo.retouchLog != nil {
             Label("已初修", systemImage: "checkmark.seal.fill").badgeStyle(.teal)
         }
+    }
+}
+
+/// 祛瑕疵层：画出自动找到的点（点圈修掉）；「点修」开着时点一下修一个点、拖动涂一片
+struct BlemishOverlay: View {
+    @Environment(AppModel.self) private var model
+    let photoID: String
+    @State private var stroke: BrushStroke?
+
+    var body: some View {
+        let spots = model.blemishSpots[photoID] ?? []
+        GeometryReader { geometry in
+            let size = geometry.size
+            Canvas { context, _ in
+                for spot in spots {
+                    let r = spot.radius * size.width
+                    let rect = CGRect(x: spot.center.x * size.width - r, y: spot.center.y * size.height - r, width: r * 2, height: r * 2)
+                    context.stroke(Path(ellipseIn: rect), with: .color(.teal), style: StrokeStyle(lineWidth: 1.5, dash: [4, 3]))
+                }
+                if let stroke {
+                    let width = stroke.radius * size.width * 2
+                    let points = stroke.points.map { CGPoint(x: $0.x * size.width, y: $0.y * size.height) }
+                    var path = Path()
+                    if points.count == 1 {
+                        path.addEllipse(in: CGRect(x: points[0].x - width / 2, y: points[0].y - width / 2, width: width, height: width))
+                        context.fill(path, with: .color(.teal.opacity(0.35)))
+                    } else {
+                        path.addLines(points)
+                        context.stroke(path, with: .color(.teal.opacity(0.35)), style: StrokeStyle(lineWidth: width, lineCap: .round, lineJoin: .round))
+                    }
+                }
+            }
+            .contentShape(Rectangle())
+            .gesture(
+                DragGesture(minimumDistance: 0)
+                    .onChanged { value in
+                        let point = normalized(value.location, in: size)
+                        if stroke == nil {
+                            guard model.blemishMode else { return }
+                            stroke = BrushStroke(points: [point], radius: model.blemishSize)
+                        } else {
+                            stroke?.points.append(point)
+                        }
+                    }
+                    .onEnded { value in
+                        let moved = hypot(value.translation.width, value.translation.height) > 3
+                        let point = normalized(value.location, in: size)
+                        // 点在自动找到的圈里：修这个点（圈的大小按找到时的斑点大小）
+                        if !moved, let spot = spots.first(where: {
+                            hypot(($0.center.x - point.x) * size.width, ($0.center.y - point.y) * size.height) <= max($0.radius * size.width, 6)
+                        }) {
+                            model.healSpot(spot)
+                        } else if let stroke, model.blemishMode {
+                            model.healBlemish([stroke])
+                        }
+                        stroke = nil
+                    }
+            )
+        }
+    }
+
+    private func normalized(_ location: CGPoint, in size: CGSize) -> CGPoint {
+        CGPoint(x: min(1, max(0, location.x / size.width)), y: min(1, max(0, location.y / size.height)))
     }
 }
 

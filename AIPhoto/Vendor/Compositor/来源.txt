@@ -1,0 +1,7 @@
+本目录的 4 个 C 文件原样取自开源修图软件 Compositor（MIT 许可证，见 LICENSE.txt）：
+https://github.com/robbietilton/Compositor
+版本：551a35fc06fb8429fed3b99b175e31681875f580（2026-10-22 取）
+原路径：Compositor/Rendering/HealPixels.c/.h、PatchPixels.c/.h
+
+用途：spot_heal（修复画笔）用于祛瑕疵，patch_fill（内容识别填充）用于本机去小杂物，Swift 包装见 AIPhoto/Core/LocalHealer.swift。
+更新时整目录替换并改上面的版本号，不要在这里改代码。

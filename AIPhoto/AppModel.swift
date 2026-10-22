@@ -111,6 +111,16 @@ final class AppModel {
         var chatMessageID: UUID? = nil
         /// 一键初修 / 一键去杂物交给后台的：底部按本轮统计进度，取消时一起停
         var batch = false
+        /// 指定用本机还是 AI；nil 表示自动（小且周围是纹理的走本机，第 19.2 节）。有重画指令的只能 AI
+        var engine: CleanupMethod? = nil
+        /// 祛瑕疵：本机时用修复画笔（spot_heal），而不是去杂物的内容识别填充
+        var heal = false
+        /// 完成后写进初修记录（去掉了什么）；祛瑕疵和对没有初修记录的照片重来时不写，免得被标成「已初修」
+        var writesLog = true
+        /// 涂抹面积占画面的估计比例（按笔迹算，入队时算好），决定要不要先试本机
+        var areaEstimate: Double = 1
+        /// 正在本机名额里跑：本机补只要一两秒，不和 AI 抢那两个名额
+        var inLocalPool = false
         var isRunning = false
         /// 开始请求的时间：底部和对话卡片显示已等多久
         var startedAt: Date?
@@ -146,7 +156,10 @@ final class AppModel {
     var inspectorMode: InspectorMode = InspectorMode(rawValue: UserDefaults.standard.string(forKey: "inspectorMode") ?? "") ?? .culling {
         didSet {
             UserDefaults.standard.set(inspectorMode.rawValue, forKey: "inspectorMode")
-            if inspectorMode == .culling { exitBrush() }
+            if inspectorMode == .culling {
+                exitBrush()
+                blemishMode = false
+            }
         }
     }
     var editTool: EditTool = EditTool(rawValue: UserDefaults.standard.string(forKey: "editTool") ?? "") ?? .adjust {
@@ -154,8 +167,16 @@ final class AppModel {
             UserDefaults.standard.set(editTool.rawValue, forKey: "editTool")
             // 画笔只属于去杂物工具：离开时关掉，避免在看不到画笔设置时误涂
             if editTool != .cleanup { exitBrush() }
+            if editTool != .portrait { blemishMode = false }
         }
     }
+    /// 祛瑕疵的「点修」：开着时在大图上点一下修一个点，拖动涂一片
+    var blemishMode = false
+    /// 点修圈的半径，以画面宽度为单位
+    var blemishSize: CGFloat = 0.012
+    /// 自动找斑列出的点，按照片记，只在本次打开期间保留
+    var blemishSpots: [String: [BlemishFinder.Spot]] = [:]
+    var findingBlemishPhotoIDs: Set<String> = []
     /// 多图合成进行中；nil 表示没有在合成
     var composite: CompositeSession?
     var showCompositePicker = false
@@ -180,6 +201,8 @@ final class AppModel {
     private var cleanupFailures: [String] = []
     /// 同时向去杂物服务发出的请求数
     private static let cleanupConcurrency = 2
+    /// 同时在本机补的任务数（内容识别填充自己会用多核）
+    private static let localConcurrency = 2
 
     /// 个人风格预设列表（全局，与照片文件夹无关）
     var styles: [StylePreset] = []
@@ -817,7 +840,12 @@ final class AppModel {
 
     func toggleBrush() {
         brushMode.toggle()
-        if brushMode { showTool(.cleanup) } else { strokes = [] }
+        if brushMode {
+            blemishMode = false
+            showTool(.cleanup)
+        } else {
+            strokes = []
+        }
     }
 
     private func exitBrush() {
@@ -855,10 +883,46 @@ final class AppModel {
         strokes = []
     }
 
-    func enqueueCleanup(photoID: String, strokes: [BrushStroke], itemName: String?, isLarge: Bool, batch: Bool = false) {
-        cleanupJobs.append(CleanupJob(photoID: photoID, strokes: strokes, itemName: itemName, isLarge: isLarge, batch: batch))
-        if batch { retouchRun?.jobs += 1 }
+    func enqueueCleanup(
+        photoID: String, strokes: [BrushStroke], itemName: String?, isLarge: Bool, batch: Bool = false, engine: CleanupMethod? = nil
+    ) {
+        enqueue(CleanupJob(photoID: photoID, strokes: strokes, itemName: itemName, isLarge: isLarge, batch: batch, engine: engine))
+    }
+
+    private func enqueue(_ job: CleanupJob) {
+        var job = job
+        job.areaEstimate = strokeArea(job.strokes, photoID: job.photoID)
+        cleanupJobs.append(job)
+        if job.batch { retouchRun?.jobs += 1 }
         pumpCleanupQueue()
+    }
+
+    /// 笔迹盖住的面积占画面的比例（粗算：每笔按圆和线段的面积相加，与去杂物蒙版一样放大 1.25 倍）
+    private func strokeArea(_ strokes: [BrushStroke], photoID: String) -> Double {
+        guard let url = photos[photoID]?.editURL, let size = ImageLoader.orientedPixelSize(at: url), size.height > 0 else { return 1 }
+        let aspect = Double(size.width / size.height)
+        var area = 0.0
+        for stroke in strokes {
+            // 在「宽 = 1、高 = 1/aspect」的坐标里算，最后除以画面面积 1/aspect
+            let radius = Double(stroke.radius) * 1.25
+            var length = 0.0
+            for (a, b) in zip(stroke.points, stroke.points.dropFirst()) {
+                length += hypot(Double(b.x - a.x), Double(b.y - a.y) / aspect)
+            }
+            area += Double.pi * radius * radius + length * radius * 2
+        }
+        return area * aspect
+    }
+
+    /// 先在本机名额里试：指定本机的，或自动且面积够小的；有重画指令（对话重画、合成融合）的只能 AI
+    private func wantsLocal(_ job: CleanupJob) -> Bool {
+        guard job.prompt == nil else { return false }
+        if job.heal { return true }
+        switch job.engine {
+        case .local: return true
+        case .ai: return false
+        case nil: return job.areaEstimate < CleanupEngine.localMaxArea * 1.5
+        }
     }
 
     func isCleaning(_ photoID: String) -> Bool {
@@ -1061,14 +1125,18 @@ final class AppModel {
         }) {
             cleanupJobs[index].isRunning = true
             cleanupJobs[index].startedAt = Date()
+            cleanupJobs[index].inLocalPool = wantsLocal(cleanupJobs[index])
             let job = cleanupJobs[index]
             cleanupTasks[job.id] = Task { await runCleanupJob(job, folder: folder) }
         }
     }
 
-    /// 对话改图是摄影师正在等的：多给一个名额，不用等一键初修排着的去杂物
+    /// 本机补和 AI 各有名额。对话改图是摄影师正在等的：AI 多给一个名额，不用等一键初修排着的去杂物
     private func canStart(_ job: CleanupJob) -> Bool {
-        let running = cleanupJobs.filter(\.isRunning).count
+        if wantsLocal(job) {
+            return cleanupJobs.filter { $0.isRunning && $0.inLocalPool }.count < Self.localConcurrency
+        }
+        let running = cleanupJobs.filter { $0.isRunning && !$0.inLocalPool }.count
         return running < Self.cleanupConcurrency + (job.fromChat ? 1 : 0)
     }
 
@@ -1076,11 +1144,27 @@ final class AppModel {
         let outcome: Result<CleanupPatch, Error>
         do {
             guard let photo = photos[job.photoID] else { throw CleanupEngine.CleanupError.unreadable }
-            let purpose: AIPurpose = job.fromChat ? .chatRedraw : job.prompt == Compositor.blendPrompt ? .compositeBlend : .cleanup
-            let provider = try await InpaintService.makeProvider(purpose: purpose)
-            outcome = .success(try await CleanupEngine.run(
-                photo: photo, strokes: job.strokes, prompt: job.prompt, folder: folder, provider: provider
-            ))
+            if job.inLocalPool {
+                let strokes = job.strokes, forced = job.engine == .local, heal = job.heal
+                let local = try await Task.detached { () throws -> CleanupPatch? in
+                    if heal { return try CleanupEngine.runHeal(photo: photo, strokes: strokes, folder: folder) }
+                    return forced
+                        ? try CleanupEngine.runLocal(photo: photo, strokes: strokes, folder: folder)
+                        : try CleanupEngine.runLocalIfSuitable(photo: photo, strokes: strokes, folder: folder)
+                }.value
+                guard let local else {
+                    // 周围有结构或实际面积偏大：转去排 AI 的队
+                    handOverToAI(job)
+                    return
+                }
+                outcome = .success(local)
+            } else {
+                let purpose: AIPurpose = job.fromChat ? .chatRedraw : job.prompt == Compositor.blendPrompt ? .compositeBlend : .cleanup
+                let provider = try await InpaintService.makeProvider(purpose: purpose)
+                outcome = .success(try await CleanupEngine.run(
+                    photo: photo, strokes: job.strokes, prompt: job.prompt, folder: folder, provider: provider
+                ))
+            }
         } catch {
             outcome = .failure(error)
         }
@@ -1097,6 +1181,8 @@ final class AppModel {
         case .success(let patch):
             // 这一步在后台处理期间被撤销了：结果不再贴上
             if let messageID = job.chatMessageID, chatStep(job.photoID, messageID)?.undone == true { break }
+            var patch = patch
+            patch.name = job.itemName
             // 先读后写：@Observable 属性在写入期间再读取同一属性会触发独占访问冲突而崩溃
             let patches = (photos[job.photoID]?.cleanups ?? []) + [patch]
             recordUndo(.cleanups, ids: [job.photoID], label: job.undoLabel)
@@ -1108,12 +1194,13 @@ final class AppModel {
                 }
             } else if job.fromChat {
                 appendChat(job.photoID, ChatMessage(role: .assistant, text: "已完成：\(job.undoLabel)"))
-            } else if let item = job.itemName {
+            } else if let item = job.itemName, job.writesLog {
+                let how = "（\(patch.method?.title ?? "AI")）"
                 appendLog(job.photoID) {
                     if job.isLarge {
-                        $0.warnings.append("去掉了\(item)，消除区域较大，建议对比检查")
+                        $0.warnings.append("去掉了\(item)\(how)，消除区域较大，建议对比检查")
                     } else {
-                        $0.actions.append("去掉了\(item)")
+                        $0.actions.append("去掉了\(item)\(how)")
                     }
                 }
             }
@@ -1124,7 +1211,7 @@ final class AppModel {
                 appendChat(job.photoID, ChatMessage(
                     role: .assistant, text: "\(job.undoLabel)失败：\(error.localizedDescription)", isError: true
                 ))
-            } else if let item = job.itemName {
+            } else if let item = job.itemName, job.writesLog {
                 appendLog(job.photoID) { $0.warnings.append("去掉\(item)失败：\(error.localizedDescription)") }
             }
         }
@@ -1137,6 +1224,91 @@ final class AppModel {
             )
             cleanupFailures = []
         }
+    }
+
+    private func handOverToAI(_ job: CleanupJob) {
+        cleanupTasks[job.id] = nil
+        guard !Task.isCancelled, let index = cleanupJobs.firstIndex(where: { $0.id == job.id }) else { return }
+        cleanupJobs[index].engine = .ai
+        cleanupJobs[index].inLocalPool = false
+        cleanupJobs[index].isRunning = false
+        cleanupJobs[index].startedAt = nil
+        pumpCleanupQueue()
+    }
+
+    /// 对某一处修补换一种方式重做：拿掉原来的修补块，照当时的笔迹重新排队
+    func redoCleanup(_ patchID: UUID, with method: CleanupMethod) {
+        guard let id = selectedPhotoID, let patches = photos[id]?.cleanups,
+              let patch = patches.first(where: { $0.id == patchID }), let strokes = patch.strokes else { return }
+        recordUndo(.cleanups, ids: [id], label: "\(method.title)重来")
+        let kept = patches.filter { $0.id != patchID }
+        photos[id]?.cleanups = kept.isEmpty ? nil : kept
+        var job = CleanupJob(photoID: id, strokes: strokes, itemName: patch.name, isLarge: false, engine: method)
+        job.writesLog = photos[id]?.retouchLog != nil
+        if patch.name == CleanupEngine.blemishName {
+            job.writesLog = false
+            if method == .local { job.heal = true } else { job.prompt = CleanupEngine.blemishPrompt }
+        }
+        enqueue(job)
+        scheduleSave()
+    }
+
+    // MARK: - 祛瑕疵（第 19.1 节）
+
+    func toggleBlemishMode() {
+        blemishMode.toggle()
+        if blemishMode {
+            exitBrush()
+            showTool(.portrait)
+        }
+    }
+
+    /// 点修或涂抹一笔：立即用修复画笔在本机修掉
+    func healBlemish(_ strokes: [BrushStroke]) {
+        guard let id = selectedPhotoID, !strokes.isEmpty else { return }
+        enqueue(CleanupJob(
+            photoID: id, strokes: strokes, itemName: CleanupEngine.blemishName, isLarge: false,
+            engine: .local, heal: true, writesLog: false
+        ))
+    }
+
+    func findBlemishes() {
+        guard let id = selectedPhotoID, let folder = folderURL, !findingBlemishPhotoIDs.contains(id) else { return }
+        findingBlemishPhotoIDs.insert(id)
+        Task {
+            defer { findingBlemishPhotoIDs.remove(id) }
+            // 旧记录没有五官关键点，先补测
+            guard let current = photos[id] else { return }
+            let photo = await withFaceShapes(current)
+            do {
+                let spots = try await Task.detached { try BlemishFinder.find(in: photo, folder: folder) }.value
+                guard folderURL == folder else { return }
+                blemishSpots[id] = spots
+                if spots.isEmpty {
+                    alert = AlertInfo(title: "没有找到明显的瑕疵", message: "可以打开「点修」，在大图上点一下要修的地方。合影里很小的脸不自动找。")
+                }
+            } catch {
+                alert = AlertInfo(title: "自动找斑失败", message: error.localizedDescription)
+            }
+        }
+    }
+
+    func healSpot(_ spot: BlemishFinder.Spot) {
+        guard let id = selectedPhotoID else { return }
+        blemishSpots[id]?.removeAll { $0.id == spot.id }
+        healBlemish([BrushStroke(points: [spot.center], radius: spot.radius)])
+    }
+
+    func healAllSpots() {
+        guard let id = selectedPhotoID, let spots = blemishSpots[id], !spots.isEmpty else { return }
+        blemishSpots[id] = nil
+        // 每个点单独一处修补，可以逐个删掉或换 AI 重来
+        for spot in spots { healBlemish([BrushStroke(points: [spot.center], radius: spot.radius)]) }
+    }
+
+    func clearSpots() {
+        guard let id = selectedPhotoID else { return }
+        blemishSpots[id] = nil
     }
 
     // MARK: - 修图预设
@@ -1467,6 +1639,14 @@ final class AppModel {
         scheduleSave()
     }
 
+    func removeCleanup(_ patchID: UUID) {
+        guard let id = selectedPhotoID, let patches = photos[id]?.cleanups else { return }
+        recordUndo(.cleanups, ids: [id], label: "删掉一处修补")
+        let kept = patches.filter { $0.id != patchID }
+        photos[id]?.cleanups = kept.isEmpty ? nil : kept
+        scheduleSave()
+    }
+
     // MARK: - 放大
 
     /// 空格：适应窗口时放大到 100% 并对准人脸（没有人脸时对准人体），已放大时回到适应窗口
@@ -1758,6 +1938,7 @@ final class AppModel {
 
 extension AppModel.CleanupJob {
     var undoLabel: String {
+        if heal { return "祛瑕疵" }
         guard let itemName else { return "去杂物" }
         return prompt == nil ? "去掉\(itemName)" : "重画\(itemName)"
     }
