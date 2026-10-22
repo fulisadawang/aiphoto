@@ -60,6 +60,8 @@ struct AIPhotoApp: App {
                 .environment(model)
                 .frame(minWidth: 1100, minHeight: 700)
                 .onAppear { delegate.openFolder = { [model] in model.requestOpen($0) } }
+                // 模型下拉列表按当前连接的服务实际有的模型列出
+                .task { await ServiceModels.shared.refresh() }
                 .background(ReopenBridge(delegate: delegate))
         }
         .commands {

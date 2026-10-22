@@ -70,7 +70,6 @@ struct ChatPanel: View {
                     if option.id == currentModel { Image(systemName: "checkmark") }
                     Text(option.name + "（" + (option.claude ? "Claude · " : "") + option.note + "）")
                 }
-                .disabled(option.unavailable)
             }
             Divider()
             Button("其他模型…") {

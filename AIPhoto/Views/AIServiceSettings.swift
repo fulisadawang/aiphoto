@@ -115,6 +115,13 @@ struct AIServiceSettings: View {
                             .fixedSize(horizontal: false, vertical: true)
                     }
                 }
+                if let ids = ServiceModels.shared.ids, !ids.contains(ModelCatalog.visionRetouch),
+                   AIUse.allCases.contains(where: { ModelCatalog.stored($0) == ModelCatalog.visionRetouch }) {
+                    Label("这台电脑连的 Magpie 里没有「视觉修图」组：在 Magpie 里建一个，或在下面「高级设置」里给每件事选一个模型。", systemImage: "exclamationmark.triangle")
+                        .font(.caption)
+                        .foregroundStyle(.orange)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
                 Divider()
                 recentModelsView
             }
@@ -283,7 +290,7 @@ struct AIServiceSettings: View {
                 }
             }
             .groupBox()
-            Text("列表和 Magpie「视觉修图」组里的模型一致。选单个模型时，出错不会自动换下一个。")
+            Text("列表是当前连接的服务里实际有的模型。选单个模型时，出错不会自动换下一个。")
                 .font(.caption)
                 .foregroundStyle(.tertiary)
                 .padding(.horizontal, 4)
@@ -310,8 +317,11 @@ struct AIServiceSettings: View {
         probe = .checking
         do {
             let key = try await SecretStore.loadIfSaved(account: AppSettings.secretAccount) ?? ""
-            probe = .ok(try await ServiceProbe.modelCount(baseURL: baseURL, apiKey: key))
+            let ids = try await ServiceProbe.models(baseURL: baseURL, apiKey: key)
+            ServiceModels.shared.set(ids)
+            probe = .ok(ids.count)
         } catch {
+            ServiceModels.shared.set(nil)
             probe = .failed(ServiceProbe.hint(error, baseURL: baseURL))
         }
     }
@@ -320,8 +330,11 @@ struct AIServiceSettings: View {
         imageProbe = .checking
         do {
             let key = try await SecretStore.loadIfSaved(account: InpaintService.secretAccount) ?? ""
-            imageProbe = .ok(try await ServiceProbe.modelCount(baseURL: imageBaseURL, apiKey: key))
+            let ids = try await ServiceProbe.models(baseURL: imageBaseURL, apiKey: key)
+            ServiceModels.shared.set(ids, image: true)
+            imageProbe = .ok(ids.count)
         } catch {
+            ServiceModels.shared.set(nil, image: true)
             imageProbe = .failed(ServiceProbe.hint(error, baseURL: imageBaseURL))
         }
     }
@@ -411,6 +424,13 @@ private struct ModelRow: View {
                         .font(.caption)
                         .foregroundStyle(.secondary)
                         .padding(.leading, 36)
+                    // 换了电脑或服务后，原来选的模型在这个服务里可能没有，一用就会报错
+                    if let ids = ServiceModels.shared.available(for: use), !ids.contains(value) {
+                        Label("当前连接的服务里没有这个模型，用的时候会出错；请从列表里重新选", systemImage: "exclamationmark.triangle")
+                            .font(.caption)
+                            .foregroundStyle(.orange)
+                            .padding(.leading, 36)
+                    }
                 }
             }
         }
@@ -424,7 +444,6 @@ private struct ModelRow: View {
     }
 
     private func warning(_ option: ModelOption) -> String? {
-        if option.unavailable { return "这个模型现在调用不了：\(option.note)" }
         if option.claude, use == .culling || use == .look { return "这是 Claude，你定过选片不用 Claude" }
         return nil
     }

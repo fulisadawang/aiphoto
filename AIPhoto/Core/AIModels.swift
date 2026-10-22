@@ -48,7 +48,7 @@ enum AIUse: String, CaseIterable, Identifiable {
     }
 }
 
-/// 设置页里列出的候选模型。值为空字符串表示「跟随」：理解修图描述跟随 AI 选片，画图用服务默认的图片模型
+/// 下拉列表里的一个模型。值为空字符串表示「跟随」：理解修图描述跟随 AI 选片，画图用服务默认的图片模型
 struct ModelOption: Identifiable, Hashable {
     let id: String
     let name: String
@@ -56,8 +56,40 @@ struct ModelOption: Identifiable, Hashable {
     var recommended = false
     /// 用户定过选片不用 Claude：照样列出，选片时提醒
     var claude = false
-    /// 实测调用不了（如 Cursor 免费版限制），照样列出，标原因
-    var unavailable = false
+}
+
+/// 当前连接的服务（如 Magpie）实际有哪些模型：启动时和设置页检查连接时向 /models 取。
+/// 下拉列表只列这些，不写死（用户 2026-10-22：别人的 Mac 连自己的 Magpie 时，列出来的还是作者那台的模型）
+@MainActor @Observable
+final class ServiceModels {
+    static let shared = ServiceModels()
+
+    /// 看图连接上的模型；nil 表示还没取到或取失败
+    private(set) var ids: [String]?
+    /// 画图单独设置连接时，那个连接上的模型
+    private(set) var imageIDs: [String]?
+
+    func set(_ ids: [String]?, image: Bool = false) {
+        if image { imageIDs = ids } else { self.ids = ids }
+    }
+
+    /// 按设置里保存的地址和密钥重新取一次；取不到时清空，下拉列表只剩当前选中的
+    func refresh() async {
+        let defaults = UserDefaults.standard
+        let baseURL = defaults.string(forKey: AppSettings.baseURLKey) ?? AppSettings.defaultBaseURL
+        let key = (try? await SecretStore.loadIfSaved(account: AppSettings.secretAccount)) ?? ""
+        ids = try? await ServiceProbe.models(baseURL: baseURL, apiKey: key)
+        if defaults.bool(forKey: InpaintService.separateKey) {
+            let imageURL = defaults.string(forKey: InpaintService.baseURLKey) ?? AppSettings.defaultBaseURL
+            let imageKey = (try? await SecretStore.loadIfSaved(account: InpaintService.secretAccount)) ?? ""
+            imageIDs = try? await ServiceProbe.models(baseURL: imageURL, apiKey: imageKey)
+        }
+    }
+
+    /// 某件事的下拉列表用哪个连接上的模型
+    func available(for use: AIUse) -> [String]? {
+        use == .image && UserDefaults.standard.bool(forKey: InpaintService.separateKey) ? imageIDs : ids
+    }
 }
 
 enum ModelCatalog {
@@ -67,36 +99,46 @@ enum ModelCatalog {
     /// 旧推荐，只用于把旧设置迁移到视觉修图组
     static let gemini = "group/auto-gemini-3-8-flash"
 
-    /// 「视觉修图」组里的具体模型，顺序与 Magpie 里一致（用户 2026-10-21 要求全部列进下拉列表，需求清单第 18 节）。
-    /// 2026-10-21 实测：两个 GPT 和 Gemini 能用；Grok 返回 Cursor 免费版不能用指定模型
-    static let groupModels: [ModelOption] = [
-        ModelOption(id: "codex/gpt-5.6-luna", name: "GPT-5.6-Luna", note: "Codex"),
-        ModelOption(id: "codex/gpt-6-luna", name: "GPT-6-Luna", note: "Codex"),
-        ModelOption(id: "antigravity/gemini-3.8-flash", name: "Gemini 3.8 Flash", note: "Antigravity"),
-        ModelOption(id: "antigravity/claude-sonnet-4-6", name: "Claude Sonnet 4.6 (Thinking)", note: "Antigravity", claude: true),
-        ModelOption(id: "cursor/grok-4.7@256k", name: "Grok 4.7 @ 256k", note: "Cursor 免费版目前用不了", unavailable: true),
-        ModelOption(id: "cursor/grok-4.7@500k", name: "Grok 4.7 @ 500k", note: "Cursor 免费版目前用不了", unavailable: true),
-        ModelOption(id: "cursor/claude-opus-5-5@300k", name: "Claude Opus 5.5 @ 300k", note: "Cursor", claude: true),
-        ModelOption(id: "cursor/claude-opus-5-5@1m", name: "Claude Opus 5.5 @ 1m", note: "Cursor", claude: true),
-        ModelOption(id: "cursor/claude-opus-5@300k", name: "Claude Opus 5 @ 300k", note: "Cursor", claude: true),
-        ModelOption(id: "cursor/claude-opus-5@1m", name: "Claude Opus 5 @ 1m", note: "Cursor", claude: true),
-        ModelOption(id: "antigravity/claude-opus-4-6-thinking", name: "Claude Opus 4.6 (Thinking)", note: "Antigravity", claude: true),
-    ]
-
+    /// 下拉列表 = 当前连接的服务返回的模型：路由组在前（「视觉修图」组最前、标推荐），其余按服务返回的顺序
+    @MainActor
     static func options(for use: AIUse) -> [ModelOption] {
+        let ids = ServiceModels.shared.available(for: use) ?? []
+        let groups = ids.filter { $0.hasPrefix("group/") }.sorted { $0 == visionRetouch && $1 != visionRetouch }
+        let images = ids.filter(isImageModel)
+        let models = ids.filter { !$0.hasPrefix("group/") && !isImageModel($0) }
         switch use {
         case .culling, .locate, .chat:
-            [ModelOption(id: visionRetouch, name: "视觉修图", note: "推荐 · Magpie 组，按顺序自动换", recommended: true)] + groupModels
+            return (groups + models).map(option)
         case .look:
-            [ModelOption(id: "", name: "同 AI 选片", note: "推荐", recommended: true)] + groupModels
+            return [ModelOption(id: "", name: "同 AI 选片", note: "推荐", recommended: true)] + (groups + models).map(option)
         case .image:
-            // Magpie 不传模型时用 gpt-image-2；传 auto-auto 会被路由到只回文字的模型
-            [ModelOption(id: "", name: "gpt-image-2", note: "推荐 · 服务默认", recommended: true)]
+            // Magpie 不传模型时用默认的图片模型；传 auto-auto 这类组会被路由到只回文字的模型
+            return [ModelOption(id: "", name: "服务默认的画图模型", note: "推荐", recommended: true)] + images.map(option)
         }
     }
 
+    private static func option(_ id: String) -> ModelOption {
+        if id == visionRetouch {
+            return ModelOption(id: id, name: "视觉修图", note: "推荐 · Magpie 组，按顺序自动换", recommended: true)
+        }
+        if id.hasPrefix("group/") {
+            return ModelOption(id: id, name: "组：\(id.dropFirst("group/".count))", note: "Magpie 组")
+        }
+        // 「codex/gpt-5.6-luna」显示成「gpt-5.6-luna · codex」
+        let parts = id.split(separator: "/", maxSplits: 1)
+        let name = parts.count == 2 ? String(parts[1]) : id
+        let note = parts.count == 2 ? String(parts[0]) : "模型"
+        return ModelOption(id: id, name: name, note: note, claude: isClaude(id))
+    }
+
+    /// 只认名字里带 image 的为画图模型（如 gpt-image-2）；认不出的可以在「自定义…」里填
+    private static func isImageModel(_ id: String) -> Bool { id.lowercased().contains("image") }
+
     static func recommended(for use: AIUse) -> String {
-        options(for: use).first { $0.recommended }?.id ?? ""
+        switch use {
+        case .culling, .locate, .chat: visionRetouch
+        case .look, .image: ""
+        }
     }
 
     static func stored(_ use: AIUse) -> String {
@@ -121,6 +163,7 @@ enum ModelCatalog {
     /// 实际回答的模型名（Magpie 返回的 model，如 gpt-5.6-luna）是不是 Claude
     static func isClaude(_ model: String) -> Bool { model.lowercased().contains("claude") }
 
+    @MainActor
     static func displayName(_ id: String, use: AIUse) -> String {
         options(for: use).first { $0.id == id }?.name ?? id
     }
@@ -159,7 +202,8 @@ enum ServiceProbe {
         }
     }
 
-    static func modelCount(baseURL text: String, apiKey: String) async throws -> Int {
+    /// 服务上所有模型的 id，按服务返回的顺序
+    static func models(baseURL text: String, apiKey: String) async throws -> [String] {
         guard let baseURL = URL(string: text.trimmingCharacters(in: .whitespaces)), baseURL.scheme?.hasPrefix("http") == true
         else { throw ProbeError.invalidURL }
         var request = URLRequest(url: baseURL.appendingPathComponent("models"))
@@ -170,13 +214,23 @@ enum ServiceProbe {
         let status = (response as? HTTPURLResponse)?.statusCode ?? 0
         guard status == 200 else { throw ProbeError.http(status) }
         let json = try JSONSerialization.jsonObject(with: data) as? [String: Any]
-        return (json?["data"] as? [Any])?.count ?? 0
+        return (json?["data"] as? [[String: Any]])?.compactMap { $0["id"] as? String } ?? []
     }
 
     /// 连不上时给小白看的一句话
     static func hint(_ error: Error, baseURL: String) -> String {
         if baseURL.contains("127.0.0.1") || baseURL.contains("localhost"), error is URLError {
-            return "本机的 Magpie 好像没打开。先启动 Magpie，再点「再检查一次」。"
+            return "这台电脑上连不上 Magpie。127.0.0.1 指这台电脑自己：Magpie 装在这台上就先把它打开；装在另一台电脑上，要填那台电脑的地址（如 http://100.x.x.x:3425/v1）和 Magpie 的密钥。"
+        }
+        if case ProbeError.http(let status) = error, status == 401 || status == 403 {
+            return "服务要求密钥（\(status)）。从别的电脑连 Magpie 时要在下面填 Magpie 的密钥。"
+        }
+        if error is URLError {
+            return "连不上 \(baseURL)：确认那台电脑开着、Magpie 在运行，两台电脑网络互通（如都连着 Tailscale）。"
+        }
+        // 开着 Clash 这类代理时，连不上的地址由代理回 502/504（实测：100.x 地址不在代理例外里）
+        if case ProbeError.http(let status) = error, [502, 503, 504].contains(status) {
+            return "连不上 \(baseURL)（\(status)）：多半是代理软件挡住了，把这个地址加进代理的「不走代理」名单；也确认那台电脑开着、Magpie 在运行。"
         }
         return error.localizedDescription
     }
